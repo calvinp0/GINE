@@ -98,6 +98,32 @@ def main():
     wandb.init(**init_kwargs)
     config = wandb.config  # now a wandb.Config
 
+    # Override YAML defaults with sweep hyperparameters using config.get()
+    # Model hyperparameters
+    mcfg = cfg["model"]
+    mcfg["hidden_channels"] = config.get("hidden_channels", mcfg.get("hidden_channels"))
+    mcfg["out_channels"]   = config.get("out_channels",   mcfg.get("out_channels"))
+    mcfg["num_blocks"]     = config.get("num_blocks",     mcfg.get("num_blocks"))
+    mcfg["num_spherical"]  = config.get("num_spherical",  mcfg.get("num_spherical"))
+    mcfg["num_radial"]     = config.get("num_radial",     mcfg.get("num_radial"))
+    mcfg["cutoff"]         = config.get("cutoff",         mcfg.get("cutoff"))
+    mcfg["fusion"]         = config.get("fusion",         mcfg.get("fusion"))
+    mcfg["dropout"]        = config.get("dropout",        mcfg.get("dropout"))
+
+    # Training hyperparameters
+    tcfg = cfg["training"]
+    tcfg["lr"]            = config.get("lr",           tcfg.get("lr"))
+    tcfg["weight_decay"]  = config.get("weight_decay",  tcfg.get("weight_decay"))
+    tcfg["batch_size"]    = config.get("batch_size",    tcfg.get("batch_size"))
+    tcfg["epochs"]        = config.get("epochs",        tcfg.get("epochs"))
+    # Scheduler hyperparameters
+    scfg = tcfg.get("scheduler", {})
+    scfg["T_0"]    = config.get("T_0",    scfg.get("T_0"))
+    scfg["T_mult"] = config.get("T_mult", scfg.get("T_mult"))
+    scfg["eta_min"]= config.get("eta_min",scfg.get("eta_min"))
+    scfg["decay"]  = config.get("decay",  scfg.get("decay"))
+    tcfg["scheduler"] = scfg
+
     # ── make output dir & snapshot config ─────────────
     ts       = datetime.now().strftime("%Y%m%d-%H%M%S")
     exp_name = f"dihed_{ts}"
@@ -110,7 +136,6 @@ def main():
     seed_everything(cfg["training"]["seed"])
 
     # ── build model ───────────────────────────────────
-    mcfg = cfg["model"]
     encoder = DimeNetPPEncoder(
         hidden_channels=mcfg["hidden_channels"],
         out_channels=  mcfg["out_channels"],
@@ -125,7 +150,6 @@ def main():
         dropout= mcfg["dropout"],
     ).to(device)
     # ── optimizer & scheduler ────────────────────────
-    tcfg = cfg["training"]
     opt = torch.optim.AdamW(
         model.parameters(),
         lr=float(tcfg["lr"]),
@@ -257,12 +281,12 @@ def main():
               f"LR={scheduler.get_last_lr()[0]:.2e}")
         # Log to W&B
         wandb.log({
-            "epoch":     epoch,
+            "epoch":      epoch,
             "train/loss": tr_l,
             "train/err":  tr_e,
             "val/loss":   va_l,
             "val/err":    va_e,
-            "lr":         scheduler.get_last_lr()[0],
+            "lr":          scheduler.get_last_lr()[0],
         })
         # keep best
         if va_e < best_val_err:

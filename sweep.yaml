@@ -1,0 +1,67 @@
+program: dimenet_hyp.py
+method: bayes
+bayes:
+  initial_runs: 10
+metric:
+  name: val/err
+  goal: minimize
+parameters:
+  hidden_channels:
+    distribution: int_uniform
+    min: 64
+    max: 256
+  out_channels:
+    distribution: int_uniform
+    min: 64
+    max: 256
+  num_blocks:
+    distribution: int_uniform
+    min: 2
+    max: 6
+  num_spherical:
+    distribution: int_uniform
+    min: 3
+    max: 10
+  num_radial:
+    distribution: int_uniform
+    min: 3
+    max: 10
+  cutoff:
+    distribution: uniform
+    min: 3.0
+    max: 8.0
+  fusion:
+    values: ['cat', 'symm']
+  dropout:
+    distribution: uniform
+    min: 0.0
+    max: 0.5
+  lr:
+    distribution: log_uniform
+    min: 1e-5
+    max: 1e-3
+  weight_decay:
+    distribution: log_uniform
+    min: 1e-6
+    max: 1e-4
+  batch_size:
+    distribution: int_categorical
+    values: [32, 64, 128]
+  epochs:
+    value: 50
+  T_0:
+    distribution: int_uniform
+    min: 5
+    max: 20
+  T_mult:
+    distribution: int_uniform
+    min: 1
+    max: 4
+  eta_min:
+    distribution: uniform
+    min: 1e-5
+    max: 1e-3
+  decay:
+    distribution: uniform
+    min: 0.1
+    max: 0.9

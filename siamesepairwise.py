@@ -188,40 +188,18 @@ class SiameseDimeNet(torch.nn.Module):
                 h1 * h2,
             ], dim=-1)
 
-    def forward(self, batch):
-        # unpack source/target graphs
-        batch_s = Data(
-            z=batch.z_s, pos=batch.pos_s, batch=batch.z_s_batch
-        )
-        batch_t = Data(
-            z=batch.z_t, pos=batch.pos_t, batch=batch.z_t_batch
-        )
-
-        # encode each half
-        h_s = self.encoder(batch_s)    # [B, D]
-        h_t = self.encoder(batch_t)    # [B, D]
+    def encode(self, batch):
+        batch_s = Data(z=batch.z_s, pos=batch.pos_s, batch=batch.z_s_batch)
+        batch_t = Data(z=batch.z_t, pos=batch.pos_t, batch=batch.z_t_batch)
+        return self.encoder(batch_s), self.encoder(batch_t)
 
 
-        # 1) Check each branch alone:
-        if not torch.isfinite(h_s).all():
-            print("NaNs in h_s (encoder source):", h_s[~torch.isfinite(h_s)])
-        if not torch.isfinite(h_t).all():
-            print("NaNs in h_t (encoder target):", h_t[~torch.isfinite(h_t)])
-
-
-
-        # fuse, head, then normalize to unit‐length vector in 2D
-        h_fused = self._fuse(h_s, h_t)           # [B, fusion_dim]
-
-        # e.g. right before `raw = self.head(h_fused)`
-        print("h_fused.shape:", h_fused.shape)
-        for name, p in self.head.named_parameters():
-            print(name, "→", p.shape)
-
-        if not torch.isfinite(h_fused).all():
-            print("Non-finite entries in h_fused:", h_fused[~torch.isfinite(h_fused)])
-
-        raw     = self.head(h_fused)             # [B, 2]
-        if not torch.isfinite(raw).all():
-            print("NaNs in raw head output:", raw[~torch.isfinite(raw)])
+    def head_and_norm(self, h_fused):
+        raw = self.head(h_fused)
         return F.normalize(raw, p=2, dim=-1, eps=1e-8)
+
+    def forward(self, batch):
+        # This version just calls the pieces in FP32 for now
+        h_s, h_t    = self.encode(batch)
+        h_fused     = self.fuse(h_s, h_t)
+        return self.head_and_norm(h_fused)
