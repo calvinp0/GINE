@@ -14,6 +14,7 @@ import optuna
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import wandb
+import torch.nn as nn
 
 
 def save_experiment(config, metrics, out_dir):
@@ -101,6 +102,13 @@ def make_objective(config_path):
             fusion=mcfg["fusion"],
             dropout=mcfg["dropout"],
         ).to(device)
+        # Apply Xavier initialization to all parameters
+        def init_weights(m):
+            if hasattr(m, 'weight') and m.weight is not None and m.weight.dim() > 1:
+                nn.init.xavier_uniform_(m.weight)
+            if hasattr(m, 'bias') and m.bias is not None:
+                nn.init.zeros_(m.bias)
+        model.apply(init_weights)
 
         # ── optimizer & scheduler ────────────────────────
         opt = torch.optim.AdamW(
