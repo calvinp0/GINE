@@ -180,7 +180,7 @@ def make_objective(config_path):
                 opt.zero_grad()
 
                 if use_amp:
-                    with autocast(enabled=False):
+                    with autocast(enabled=False, device_type=device.type):
                         h_s, h_t = model.encode(batch)
 
                     with autocast(device_type=device.type):
