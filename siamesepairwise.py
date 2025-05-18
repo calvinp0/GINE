@@ -177,7 +177,7 @@ class SiameseDimeNet(torch.nn.Module):
                 layers += [torch.nn.ReLU(), torch.nn.Dropout(dropout)]
         self.head = torch.nn.Sequential(*layers)
 
-    def _fuse(self, h1, h2):
+    def fuse(self, h1, h2):
         if self.fusion == 'cat':
             return torch.cat([h1, h2], dim=-1)
         else:
