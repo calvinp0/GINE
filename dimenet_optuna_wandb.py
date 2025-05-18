@@ -26,7 +26,7 @@ def save_experiment(config, metrics, out_dir):
     print(f"👉 Saved experiment to {fname}")
 
 
-def make_objective(config_path):
+def make_objective(config_path, disable_amp):
     """
     Create an Optuna objective function that loads config from the given path for each trial.
     """
@@ -73,7 +73,8 @@ def make_objective(config_path):
         print(f"Using device: {device}")
 
         # ── AMP setup ──────────────────────────────────────
-        use_amp = device.type == "cuda"
+        # allow disabling AMP via CLI flag
+        use_amp = (device.type == "cuda") and not disable_amp
         scaler = GradScaler(enabled=use_amp)
         print(f"{'🟢' if use_amp else '🔴'} AMP {'enabled' if use_amp else 'disabled'}")
 
@@ -277,10 +278,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--trials", type=int, default=50)
+    parser.add_argument("--no-amp", action="store_true", help="Disable AMP even if CUDA is available")
     args = parser.parse_args()
 
-    # Use a closure to pass config path into the objective
-    objective_fn = make_objective(args.config)
+    # Use a closure to pass config path and amp flag into the objective
+    objective_fn = make_objective(args.config, args.no_amp)
 
     # Create a shared study for parallel executions
     study = optuna.create_study(
