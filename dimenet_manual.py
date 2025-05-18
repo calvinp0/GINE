@@ -216,7 +216,12 @@ def main():
                 # gradient clipping
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
+            if not torch.isfinite(out).all():
+                print("Non-finite values in model output:", out[~torch.isfinite(out)])
 
+            loss = loss_fn(out, batch.y)
+            if not torch.isfinite(loss):
+                print("Non-finite loss:", loss)
 
             for n, p in model.head.named_parameters():
                 if p.grad is not None and not torch.isfinite(p.grad).all():
