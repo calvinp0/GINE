@@ -203,5 +203,14 @@ class SiameseDimeNet(torch.nn.Module):
 
         # fuse, head, then normalize to unit‐length vector in 2D
         h_fused = self._fuse(h_s, h_t)           # [B, fusion_dim]
+
+        # e.g. right before `raw = self.head(h_fused)`
+        print("h_fused.shape:", h_fused.shape)
+        for name, p in self.head.named_parameters():
+            print(name, "→", p.shape)
+
+        if not torch.isfinite(h_fused).all():
+            print("Non-finite entries in h_fused:", h_fused[~torch.isfinite(h_fused)])
+
         raw     = self.head(h_fused)             # [B, 2]
         return F.normalize(raw, p=2, dim=-1, eps=1e-8)

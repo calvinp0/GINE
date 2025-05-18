@@ -217,6 +217,11 @@ def main():
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
 
+
+            for n, p in model.head.named_parameters():
+                if p.grad is not None and not torch.isfinite(p.grad).all():
+                    print(f"Non-finite grads in {n}", p.grad[~torch.isfinite(p.grad)])
+
             err = metric_fn(out, batch.y)
             b  = batch.y.size(0)
             tot_loss += loss.item()*b
