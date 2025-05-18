@@ -1,0 +1,8 @@
+{"time":"2025-05-18T12:33:36.290436515+03:00","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/calvin/code/GINE/wandb/run-20250518_123336-0upu2g5k/logs/debug-core.log"}
+{"time":"2025-05-18T12:33:36.685957328+03:00","level":"INFO","msg":"created new stream","id":"0upu2g5k"}
+{"time":"2025-05-18T12:33:36.685975335+03:00","level":"INFO","msg":"stream: started","id":"0upu2g5k"}
+{"time":"2025-05-18T12:33:36.686035845+03:00","level":"INFO","msg":"writer: Do: started","stream_id":"0upu2g5k"}
+{"time":"2025-05-18T12:33:36.686075795+03:00","level":"INFO","msg":"handler: started","stream_id":"0upu2g5k"}
+{"time":"2025-05-18T12:33:36.686105909+03:00","level":"INFO","msg":"sender: started","stream_id":"0upu2g5k"}
+{"time":"2025-05-18T12:33:36.976009493+03:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-18T12:33:36.976100854+03:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}

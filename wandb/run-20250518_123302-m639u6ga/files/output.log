@@ -1,0 +1,21 @@
+Seed set to 42
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 96, in main
+    scheduler = CosineRestartsDecay(
+  File "/home/calvin/code/GINE/schedulers.py", line 22, in __init__
+    super().__init__(
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/optim/lr_scheduler.py", line 1783, in __init__
+    raise ValueError(f"Expected positive integer T_0, but got {T_0}")
+ValueError: Expected positive integer T_0, but got 20.0
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 96, in main
+    scheduler = CosineRestartsDecay(
+  File "/home/calvin/code/GINE/schedulers.py", line 22, in __init__
+    super().__init__(
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/optim/lr_scheduler.py", line 1783, in __init__
+    raise ValueError(f"Expected positive integer T_0, but got {T_0}")
+ValueError: Expected positive integer T_0, but got 20.0

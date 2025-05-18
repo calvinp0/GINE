@@ -1,0 +1,14 @@
+Seed set to 42
+📊 Dataset split: total=1696 | train=1356 | val=169 | test=171
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 250, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 163, in main
+    with autocast():
+TypeError: autocast.__init__() missing 1 required positional argument: 'device_type'
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 250, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 163, in main
+    with autocast():
+TypeError: autocast.__init__() missing 1 required positional argument: 'device_type'

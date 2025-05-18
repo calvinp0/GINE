@@ -1,0 +1,84 @@
+Seed set to 42
+📊 Dataset split: total=1696 | train=1356 | val=169 | test=171
+Training:   0%|                                                                                                                                                             | 0/43 [00:00<?, ?it/s]/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/linear.py:125: UserWarning: Attempting to use hipBLASLt on an unsupported architecture! Overriding blas backend to hipblas (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:310.)
+  return F.linear(input, self.weight, self.bias)
+Traceback (most recent call last):                                                                                                                                                                 
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 264, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 173, in main
+    out = model(batch)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1845, in _call_impl
+    return inner()
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1793, in inner
+    result = forward_call(*args, **kwargs)
+  File "/home/calvin/code/GINE/siamesepairwise.py", line 201, in forward
+    h_s = self.encoder(batch_s)    # [B, D]
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/code/GINE/dimenet.py", line 75, in forward
+    embed = self.model(data.z, data.pos, data.batch)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 719, in forward
+    x = interaction_block(x, rbf, sbf, idx_kj, idx_ji)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 332, in forward
+    h = layer(h)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 167, in forward
+    return x + self.act(self.lin2(self.act(self.lin1(x))))
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/resolver.py", line 27, in swish
+    return x * x.sigmoid()
+torch.OutOfMemoryError: HIP out of memory. Tried to allocate 20.00 MiB. GPU 0 has a total capacity of 7.98 GiB of which 0 bytes is free. Of the allocated memory 420.48 MiB is allocated by PyTorch, and 5.52 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_HIP_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 264, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 173, in main
+    out = model(batch)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1845, in _call_impl
+    return inner()
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1793, in inner
+    result = forward_call(*args, **kwargs)
+  File "/home/calvin/code/GINE/siamesepairwise.py", line 201, in forward
+    h_s = self.encoder(batch_s)    # [B, D]
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/code/GINE/dimenet.py", line 75, in forward
+    embed = self.model(data.z, data.pos, data.batch)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 719, in forward
+    x = interaction_block(x, rbf, sbf, idx_kj, idx_ji)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 332, in forward
+    h = layer(h)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/models/dimenet.py", line 167, in forward
+    return x + self.act(self.lin2(self.act(self.lin1(x))))
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch_geometric/nn/resolver.py", line 27, in swish
+    return x * x.sigmoid()
+torch.OutOfMemoryError: HIP out of memory. Tried to allocate 20.00 MiB. GPU 0 has a total capacity of 7.98 GiB of which 0 bytes is free. Of the allocated memory 420.48 MiB is allocated by PyTorch, and 5.52 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_HIP_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

@@ -1,0 +1,36 @@
+data:
+  force_reload: true
+  input_types:
+  - r1h
+  - r2h
+  keep_hs: true
+  root: data/equi_dataset
+  sanitize: false
+  sdf_folder: /home/calvin/code/chemprop_phd_customised/habnet/data/processed/sdf_data
+  target_columns:
+  - psi_1_dihedral_sin
+  - psi_1_dihedral_cos
+  target_csv: /home/calvin/code/chemprop_phd_customised/habnet/data/processed/target_data/target_data_sin_cos.csv
+logging:
+  output_root: experiments
+model:
+  cutoff: 5.0
+  dropout: 0.1
+  fusion: cat
+  hidden_channels: 256
+  num_blocks: 4
+  num_radial: 6
+  num_spherical: 7
+  out_channels: 256
+training:
+  batch_size: 32
+  epochs: 200
+  lr: 1e-4
+  scheduler:
+    T_0: 20
+    T_mult: 2
+    decay: 0.3
+    eta_min: 1e-4
+    name: CosineRestartsDecay
+  seed: 42
+  weight_decay: 1e-5

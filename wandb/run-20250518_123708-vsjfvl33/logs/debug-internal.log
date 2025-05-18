@@ -1,0 +1,16 @@
+{"time":"2025-05-18T12:37:08.399957078+03:00","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/calvin/code/GINE/wandb/run-20250518_123708-vsjfvl33/logs/debug-core.log"}
+{"time":"2025-05-18T12:37:08.899088812+03:00","level":"INFO","msg":"created new stream","id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:08.899119208+03:00","level":"INFO","msg":"stream: started","id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:08.899185541+03:00","level":"INFO","msg":"handler: started","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:08.899195149+03:00","level":"INFO","msg":"sender: started","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:08.899187224+03:00","level":"INFO","msg":"writer: Do: started","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:09.154592822+03:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-18T12:37:09.154681659+03:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-05-18T12:37:16.554098578+03:00","level":"INFO","msg":"stream: closing","id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:16.55411248+03:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-18T12:37:16.554156868+03:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-18T12:37:17.324925991+03:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-18T12:37:17.684814474+03:00","level":"INFO","msg":"handler: closed","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:17.684837771+03:00","level":"INFO","msg":"writer: Close: closed","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:17.684861191+03:00","level":"INFO","msg":"sender: closed","stream_id":"vsjfvl33"}
+{"time":"2025-05-18T12:37:17.684864066+03:00","level":"INFO","msg":"stream: closed","id":"vsjfvl33"}

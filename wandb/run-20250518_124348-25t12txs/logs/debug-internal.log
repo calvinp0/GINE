@@ -1,0 +1,16 @@
+{"time":"2025-05-18T12:43:48.030397396+03:00","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/calvin/code/GINE/wandb/run-20250518_124348-25t12txs/logs/debug-core.log"}
+{"time":"2025-05-18T12:43:48.535658408+03:00","level":"INFO","msg":"created new stream","id":"25t12txs"}
+{"time":"2025-05-18T12:43:48.535697214+03:00","level":"INFO","msg":"stream: started","id":"25t12txs"}
+{"time":"2025-05-18T12:43:48.535704531+03:00","level":"INFO","msg":"handler: started","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:43:48.535732627+03:00","level":"INFO","msg":"writer: Do: started","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:43:48.535735323+03:00","level":"INFO","msg":"sender: started","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:43:48.810937133+03:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-18T12:43:48.811065478+03:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-05-18T12:44:00.929360502+03:00","level":"INFO","msg":"stream: closing","id":"25t12txs"}
+{"time":"2025-05-18T12:44:00.932598833+03:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-18T12:44:00.932615186+03:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-18T12:44:01.6681097+03:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-18T12:44:02.053529705+03:00","level":"INFO","msg":"handler: closed","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:44:02.053551516+03:00","level":"INFO","msg":"writer: Close: closed","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:44:02.053572828+03:00","level":"INFO","msg":"sender: closed","stream_id":"25t12txs"}
+{"time":"2025-05-18T12:44:02.053585423+03:00","level":"INFO","msg":"stream: closed","id":"25t12txs"}

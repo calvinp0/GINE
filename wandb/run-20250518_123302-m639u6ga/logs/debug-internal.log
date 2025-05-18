@@ -1,0 +1,16 @@
+{"time":"2025-05-18T12:33:02.544748466+03:00","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/calvin/code/GINE/wandb/run-20250518_123302-m639u6ga/logs/debug-core.log"}
+{"time":"2025-05-18T12:33:02.941878696+03:00","level":"INFO","msg":"created new stream","id":"m639u6ga"}
+{"time":"2025-05-18T12:33:02.941901664+03:00","level":"INFO","msg":"stream: started","id":"m639u6ga"}
+{"time":"2025-05-18T12:33:02.941947958+03:00","level":"INFO","msg":"writer: Do: started","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:02.94198132+03:00","level":"INFO","msg":"sender: started","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:02.94202423+03:00","level":"INFO","msg":"handler: started","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:03.292073838+03:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-18T12:33:03.292164596+03:00","level":"ERROR","msg":"git repo not found","error":"repository does not exist"}
+{"time":"2025-05-18T12:33:10.697870505+03:00","level":"INFO","msg":"stream: closing","id":"m639u6ga"}
+{"time":"2025-05-18T12:33:10.69788647+03:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-18T12:33:10.697915533+03:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-05-18T12:33:11.428051957+03:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-05-18T12:33:11.749288527+03:00","level":"INFO","msg":"handler: closed","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:11.749311396+03:00","level":"INFO","msg":"writer: Close: closed","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:11.749322316+03:00","level":"INFO","msg":"sender: closed","stream_id":"m639u6ga"}
+{"time":"2025-05-18T12:33:11.749341537+03:00","level":"INFO","msg":"stream: closed","id":"m639u6ga"}

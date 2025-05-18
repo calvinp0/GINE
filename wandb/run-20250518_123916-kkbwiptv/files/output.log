@@ -1,0 +1,6 @@
+Seed set to 42
+📊 Dataset split: total=1696 | train=1356 | val=169 | test=171
+/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/linear.py:125: UserWarning: Attempting to use hipBLASLt on an unsupported architecture! Overriding blas backend to hipblas (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:310.)
+  return F.linear(input, self.weight, self.bias)
+Epoch 001 | Train L=0.7581, Err=71.9° | Val   L=0.7594, Err=71.7° | LR=1.00e-04
+Epoch 002 | Train L=0.7333, Err=70.1° | Val   L=0.7725, Err=72.7° | LR=1.00e-04

@@ -1,0 +1,49 @@
+Seed set to 42
+/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/nn/modules/linear.py:125: UserWarning: Attempting to use hipBLASLt on an unsupported architecture! Overriding blas backend to hipblas (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:310.)
+  return F.linear(input, self.weight, self.bias)
+Epoch 001 | Train L=0.7536, Err=71.6° | Val   L=0.7614, Err=71.7° | LR=1.00e-04
+Epoch 002 | Train L=0.7323, Err=70.0° | Val   L=0.7727, Err=72.7° | LR=1.00e-04
+Epoch 003 | Train L=0.7330, Err=70.4° | Val   L=0.7539, Err=71.1° | LR=1.00e-04
+Epoch 004 | Train L=0.7262, Err=69.6° | Val   L=0.7224, Err=68.8° | LR=1.00e-04
+Epoch 005 | Train L=0.7243, Err=69.4° | Val   L=0.7302, Err=69.8° | LR=1.00e-04
+Epoch 006 | Train L=0.7155, Err=68.8° | Val   L=0.7091, Err=68.4° | LR=1.00e-04
+Epoch 007 | Train L=0.7087, Err=68.4° | Val   L=0.7068, Err=68.0° | LR=1.00e-04
+Epoch 008 | Train L=0.7063, Err=68.1° | Val   L=0.7139, Err=68.6° | LR=1.00e-04
+Epoch 009 | Train L=0.7052, Err=68.1° | Val   L=0.7248, Err=69.1° | LR=1.00e-04
+Epoch 010 | Train L=0.7026, Err=67.8° | Val   L=0.7073, Err=68.1° | LR=1.00e-04
+Epoch 011 | Train L=0.6997, Err=67.7° | Val   L=0.6695, Err=64.9° | LR=1.00e-04
+Epoch 012 | Train L=0.6755, Err=65.5° | Val   L=0.7073, Err=68.2° | LR=1.00e-04
+Epoch 013 | Train L=0.6817, Err=66.6° | Val   L=0.7278, Err=69.8° | LR=1.00e-04
+Epoch 014 | Train L=0.7045, Err=68.0° | Val   L=0.7123, Err=67.9° | LR=1.00e-04
+Epoch 015 | Train L=0.6640, Err=65.2° | Val   L=0.6809, Err=66.4° | LR=1.00e-04
+Epoch 016 | Train L=nan, Err=nan° | Val   L=0.6285, Err=62.7° | LR=1.00e-04
+Epoch 017 | Train L=nan, Err=nan° | Val   L=0.6810, Err=66.2° | LR=1.00e-04
+Epoch 018 | Train L=nan, Err=nan° | Val   L=0.6879, Err=66.6° | LR=1.00e-04
+Epoch 019 | Train L=nan, Err=nan° | Val   L=0.7103, Err=67.9° | LR=1.00e-04
+Epoch 020 | Train L=nan, Err=nan° | Val   L=nan, Err=nan° | LR=1.00e-04
+Epoch 021 | Train L=nan, Err=nan° | Val   L=nan, Err=nan° | LR=3.01e-05
+Epoch 022 | Train L=nan, Err=nan° | Val   L=nan, Err=nan° | LR=3.04e-05
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    if args.use_wandb:
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 159, in main
+    batch = batch.to(device)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 457, in step
+    retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 351, in _maybe_opt_step
+    if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 351, in <genexpr>
+    if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    if args.use_wandb:
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 159, in main
+    batch = batch.to(device)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 457, in step
+    retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 351, in _maybe_opt_step
+    if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/amp/grad_scaler.py", line 351, in <genexpr>
+    if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+KeyboardInterrupt

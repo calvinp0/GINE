@@ -1,0 +1,46 @@
+{
+  "os": "Linux-6.11.0-25-generic-x86_64-with-glibc2.39",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-05-18T09:37:08.399286Z",
+  "args": [
+    "--config",
+    "./config.yaml"
+  ],
+  "program": "/home/calvin/code/GINE/dimenet_manual.py",
+  "codePath": "dimenet_manual.py",
+  "email": "calvinpieters@gmail.com",
+  "root": "/home/calvin/code/GINE",
+  "host": "calvin-hermon",
+  "executable": "/home/calvin/miniforge3/envs/dmpnn_rocm/bin/python",
+  "codePathLocal": "dimenet_manual.py",
+  "cpu_count": 12,
+  "cpu_count_logical": 20,
+  "gpu": "Navi 23 [Radeon RX 6600/6600 XT/6600M]",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1966736678912",
+      "used": "792252456960"
+    }
+  },
+  "memory": {
+    "total": "33450819584"
+  },
+  "cpu": {
+    "count": 12,
+    "countLogical": 20
+  },
+  "gpu_amd": [
+    {
+      "id": "0",
+      "uniqueId": "N/A",
+      "vbiosVersion": "115-D534P00-100",
+      "performanceLevel": "auto",
+      "maxPower": "100.0",
+      "series": "Navi 23 [Radeon RX 6600/6600 XT/6600M]",
+      "model": "0x73ff",
+      "vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+      "sku": "D534P00"
+    }
+  ]
+}

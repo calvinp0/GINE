@@ -1,0 +1,24 @@
+2025-05-18 12:38:54,780 INFO    MainThread:21224 [wandb_setup.py:_flush():70] Current SDK version is 0.19.11
+2025-05-18 12:38:54,780 INFO    MainThread:21224 [wandb_setup.py:_flush():70] Configure stats pid to 21224
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_setup.py:_flush():70] Loading settings from /home/calvin/.config/wandb/settings
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_setup.py:_flush():70] Loading settings from /home/calvin/code/GINE/wandb/settings
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_setup.py:_flush():70] Loading settings from environment variables
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:setup_run_log_directory():724] Logging user logs to /home/calvin/code/GINE/wandb/run-20250518_123854-iqad1bfq/logs/debug.log
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:setup_run_log_directory():725] Logging internal logs to /home/calvin/code/GINE/wandb/run-20250518_123854-iqad1bfq/logs/debug-internal.log
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:init():852] calling init triggers
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:init():857] wandb.init called with sweep_config: {}
+config: {'model': {'hidden_channels': 256, 'out_channels': 256, 'num_blocks': 4, 'num_spherical': 7, 'num_radial': 6, 'cutoff': 5.0, 'fusion': 'cat', 'dropout': 0.1}, 'training': {'seed': 42, 'batch_size': 32, 'epochs': 200, 'lr': '1e-4', 'weight_decay': '1e-5', 'scheduler': {'name': 'CosineRestartsDecay', 'T_0': 20, 'T_mult': 2, 'eta_min': '1e-4', 'decay': 0.3}}, 'data': {'root': 'data/equi_dataset', 'sdf_folder': '/home/calvin/code/chemprop_phd_customised/habnet/data/processed/sdf_data', 'target_csv': '/home/calvin/code/chemprop_phd_customised/habnet/data/processed/target_data/target_data_sin_cos.csv', 'input_types': ['r1h', 'r2h'], 'target_columns': ['psi_1_dihedral_sin', 'psi_1_dihedral_cos'], 'keep_hs': True, 'sanitize': False, 'force_reload': True}, 'logging': {'output_root': 'experiments'}, '_wandb': {'code_path': 'code/dimenet_manual.py'}}
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:init():893] starting backend
+2025-05-18 12:38:54,781 INFO    MainThread:21224 [wandb_init.py:init():897] sending inform_init request
+2025-05-18 12:38:54,782 INFO    MainThread:21224 [backend.py:_multiprocessing_setup():101] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-05-18 12:38:54,782 INFO    MainThread:21224 [wandb_init.py:init():907] backend started and connected
+2025-05-18 12:38:54,783 INFO    MainThread:21224 [wandb_init.py:init():1005] updated telemetry
+2025-05-18 12:38:54,783 INFO    MainThread:21224 [wandb_init.py:init():1029] communicating run to backend with 90.0 second timeout
+2025-05-18 12:38:55,414 INFO    MainThread:21224 [wandb_init.py:init():1104] starting run threads in backend
+2025-05-18 12:38:55,484 INFO    MainThread:21224 [wandb_run.py:_console_start():2573] atexit reg
+2025-05-18 12:38:55,485 INFO    MainThread:21224 [wandb_run.py:_redirect():2421] redirect: wrap_raw
+2025-05-18 12:38:55,485 INFO    MainThread:21224 [wandb_run.py:_redirect():2490] Wrapping output streams.
+2025-05-18 12:38:55,485 INFO    MainThread:21224 [wandb_run.py:_redirect():2513] Redirects installed.
+2025-05-18 12:38:55,486 INFO    MainThread:21224 [wandb_init.py:init():1150] run started, returning control to user process
+2025-05-18 12:39:02,417 INFO    MainThread:21224 [wandb_watch.py:_watch():71] Watching
+2025-05-18 12:39:02,819 INFO    MsgRouterThr:21224 [mailbox.py:close():129] [no run ID] Closing mailbox, abandoning 1 handles.

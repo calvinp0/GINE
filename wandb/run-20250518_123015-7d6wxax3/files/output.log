@@ -1,0 +1,17 @@
+Seed set to 42
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 90, in main
+    opt = torch.optim.AdamW(
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/optim/adamw.py", line 58, in __init__
+    if not 0.0 <= lr:
+TypeError: '<=' not supported between instances of 'float' and 'str'
+Traceback (most recent call last):
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 242, in <module>
+    main()
+  File "/home/calvin/code/GINE/dimenet_manual.py", line 90, in main
+    opt = torch.optim.AdamW(
+  File "/home/calvin/miniforge3/envs/dmpnn_rocm/lib/python3.10/site-packages/torch/optim/adamw.py", line 58, in __init__
+    if not 0.0 <= lr:
+TypeError: '<=' not supported between instances of 'float' and 'str'
