@@ -201,6 +201,15 @@ class SiameseDimeNet(torch.nn.Module):
         h_s = self.encoder(batch_s)    # [B, D]
         h_t = self.encoder(batch_t)    # [B, D]
 
+
+        # 1) Check each branch alone:
+        if not torch.isfinite(h_s).all():
+            print("NaNs in h_s (encoder source):", h_s[~torch.isfinite(h_s)])
+        if not torch.isfinite(h_t).all():
+            print("NaNs in h_t (encoder target):", h_t[~torch.isfinite(h_t)])
+
+
+
         # fuse, head, then normalize to unit‐length vector in 2D
         h_fused = self._fuse(h_s, h_t)           # [B, fusion_dim]
 
@@ -213,4 +222,6 @@ class SiameseDimeNet(torch.nn.Module):
             print("Non-finite entries in h_fused:", h_fused[~torch.isfinite(h_fused)])
 
         raw     = self.head(h_fused)             # [B, 2]
+        if not torch.isfinite(raw).all():
+            print("NaNs in raw head output:", raw[~torch.isfinite(raw)])
         return F.normalize(raw, p=2, dim=-1, eps=1e-8)
