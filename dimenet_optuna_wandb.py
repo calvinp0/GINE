@@ -46,7 +46,7 @@ def make_objective(config_path, disable_amp):
 
         # Suggest hyperparameters from config sections
         mcfg = cfg["model"]
-        mcfg["hidden_channels"] = trial.suggest_int("hidden_channels", 64, 256)
+        mcfg["hidden_channels"] = trial.suggest_int("hidden_channels", 64, 1024)
         mcfg["out_channels"] = trial.suggest_int("out_channels", 64, 256)
         mcfg["num_blocks"] = trial.suggest_int("num_blocks", 2, 6)
         mcfg["num_spherical"] = trial.suggest_int("num_spherical", 3, 10)
@@ -59,7 +59,7 @@ def make_objective(config_path, disable_amp):
         tcfg["lr"] = trial.suggest_loguniform("lr", 1e-5, 1e-3)
         tcfg["weight_decay"] = trial.suggest_loguniform("weight_decay", 1e-6, 1e-4)
         tcfg["batch_size"] = trial.suggest_categorical("batch_size", [32, 64, 128])
-        tcfg["epochs"] = 50
+        tcfg["epochs"] = 200
 
         scfg = tcfg.get("scheduler", {})
         scfg["T_0"] = trial.suggest_int("T_0", 5, 20)
