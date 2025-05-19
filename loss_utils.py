@@ -43,13 +43,15 @@ def weighted_cosine_loss(pred, target, weights):
     return (weights * (1 - dots)).mean()
 
 
-def von_mises_nll(pred, target, kappa=2.0, eps=1e-6):
-    dot = (pred * target).sum(dim=-1).clamp(-1 + eps, 1 - eps)
-    
-    # Make kappa a tensor on the same device
-    kappa_tensor = torch.tensor(kappa, device=pred.device, dtype=pred.dtype)
-    
-    return -kappa_tensor * dot + torch.log(2 * torch.pi * torch.i0(kappa_tensor))
+def von_mises_nll_fixed_kappa(mu, target, kappa=2.0, eps=1e-8):
+    kappa = torch.tensor(kappa, device=mu.device, dtype=mu.dtype)
+    nll = -kappa * torch.cos(target - mu) + torch.log(2 * torch.pi * torch.special.i0(kappa))
+    return nll.mean()
+# Model output: mu (radians), Target: target_angle (radians)
+def angular_error(mu, target):
+    # Returns error in radians, between 0 and pi
+    error = torch.atan2(torch.sin(mu - target), torch.cos(mu - target)).abs()
+    return error.mean()
 
 
 def von_mises_nll_per_sample(pred, target, kappa=2.0, eps=1e-6):
@@ -95,6 +97,7 @@ class AngularErrorMetric(nn.Module):
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return angular_error(pred, target, self.in_degrees)
+
 
 
 # Example usage:

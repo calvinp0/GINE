@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
-from loss_utils import cosine_angle_loss, AngularErrorMetric
+from loss_utils import cosine_angle_loss, AngularErrorMetric, von_mises_nll_fixed_kappa, angular_error
 from siamesepairwise import SiameseDimeNet, DimeNetPPEncoder
 from schedulers import CosineRestartsDecay
 from data import EquiMultiMolDataset
@@ -15,6 +15,7 @@ from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import wandb
 import torch.nn as nn
+import time
 
 
 def save_experiment(config, metrics, out_dir):
@@ -175,8 +176,8 @@ def make_objective(config_path, disable_amp):
         )
 
         # ── loss + metric ─────────────────────────────────
-        loss_fn = cosine_angle_loss
-        metric_fn = AngularErrorMetric(in_degrees=True)
+        loss_fn = von_mises_nll_fixed_kappa
+        metric_fn = angular_error
 
         # ── train/val loop ────────────────────────────────
         best_val_err = 1e9
@@ -194,8 +195,9 @@ def make_objective(config_path, disable_amp):
 
                     with autocast(device_type=device.type):
                         h_fused = model.fuse(h_s, h_t)
-                        out = model.head_and_norm(h_fused)
-                        loss = loss_fn(out, batch.y)
+                        mu, kapp = model.head_mu_kappa(h_fused)
+                        target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+                        loss = loss_fn(mu=mu, target=target_angle, kappa=kapp)
 
                     scaler.scale(loss).backward()
                     scaler.unscale_(opt)
@@ -203,17 +205,25 @@ def make_objective(config_path, disable_amp):
                     scaler.step(opt)
                     scaler.update()
                 else:
-                    out = model(batch)
-                    loss = loss_fn(out, batch.y)
+                    target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+                    mu, kappa = model(batch)
+                    loss = loss_fn(mu=mu, target=target_angle, kappa=kappa)
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     opt.step()
 
-                err = metric_fn(out, batch.y)
+                err = metric_fn(mu, target_angle) * 180.0 / torch.pi
                 b = batch.y.size(0)
                 tot_loss += loss.item() * b
                 tot_err += err.item() * b
                 count += b
+                
+                # Optional: print angles for debugging
+                angle1 = torch.atan2(batch.y[:, 0], batch.y[:, 1])  # your code now
+                angle2 = torch.atan2(batch.y[:, 1], batch.y[:, 0])  # swapped
+
+                print('Sanity check: angle1[0]', angle1[0], 'angle2[0]', angle2[0])
+
             tr_l, tr_e = tot_loss / count, tot_err / count
             # Log training error as user attr
             trial.set_user_attr("train_err", tr_e)
@@ -224,9 +234,10 @@ def make_objective(config_path, disable_amp):
             with torch.no_grad():
                 for batch in tqdm(loaders["val"], desc="Validation", leave=False):
                     batch = batch.to(device)
-                    out = model(batch)
-                    l = loss_fn(out, batch.y)
-                    err = metric_fn(out, batch.y)
+                    target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+                    mu, kappa = model(batch)
+                    l = loss_fn(mu=mu, target=target_angle, kappa=kappa)
+                    err = metric_fn(mu, target_angle) * 180.0 / torch.pi
                     b = batch.y.size(0)
                     tot_loss += l.item() * b
                     tot_err += err.item() * b
@@ -275,6 +286,7 @@ def make_objective(config_path, disable_amp):
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--trials", type=int, default=50)
@@ -294,6 +306,16 @@ if __name__ == "__main__":
 
     # Optimize using the closure-based objective
     study.optimize(objective_fn, n_trials=args.trials)
+    
+    # Timing here
+    end_time = time.time()
+    elapsed_sec = end_time - start_time
+    elapsed_min = elapsed_sec / 60
+    elapsed_hr  = elapsed_sec / 3600
+    n_trials_run = len(study.trials)
+    print(f"\n🕒 Total elapsed time: {elapsed_sec:.1f} s  ({elapsed_min:.2f} min, {elapsed_hr:.2f} hr)")
+    print(f"Average time per trial: {elapsed_sec/n_trials_run:.1f} s  ({elapsed_min/n_trials_run:.2f} min)")
+    print("Best trial:", study.best_trial.params)
 
     # Save a DataFrame of all trial results
     study.trials_dataframe().to_csv("optuna_results.csv")

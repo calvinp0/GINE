@@ -198,8 +198,14 @@ class SiameseDimeNet(torch.nn.Module):
         raw = self.head(h_fused)
         return F.normalize(raw, p=2, dim=-1, eps=1e-8)
 
+    def head_mu_kappa(self, h_fused):
+        raw = self.head(h_fused)
+        mu    = raw[:, 0]            # This is a (possibly unbounded) angle in radians
+        kappa = F.softplus(raw[:, 1]) + 1e-3
+        return mu, kappa
+
     def forward(self, batch):
         # This version just calls the pieces in FP32 for now
         h_s, h_t    = self.encode(batch)
         h_fused     = self.fuse(h_s, h_t)
-        return self.head_and_norm(h_fused)
+        return self.head_mu_kappa(h_fused)
