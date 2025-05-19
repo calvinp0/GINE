@@ -3,7 +3,7 @@ from datetime import datetime
 import yaml
 import torch
 import torch.nn.functional as F
-from torch.utils.data import random_split
+from torch.utils.data import random_split, Subset
 from torch_geometric.loader import DataLoader
 from loss_utils import cosine_angle_loss, AngularErrorMetric, von_mises_nll_fixed_kappa, angular_error
 from siamesepairwise import SiameseDimeNet, DimeNetPPEncoder
@@ -16,6 +16,9 @@ from tqdm import tqdm
 import wandb
 import torch.nn as nn
 import time
+import pandas as pd
+import glob
+import numpy as np
 
 
 def save_experiment(config, metrics, out_dir):
@@ -145,6 +148,14 @@ def make_objective(config_path, disable_amp):
         g = torch.Generator().manual_seed(cfg["training"]["seed"])
         t, v, te = int(0.8 * n), int(0.1 * n), n - int(0.8 * n) - int(0.1 * n)
         train_ds, val_ds, test_ds = random_split(dataset, [t, v, te], generator=g)
+        # Save split indices for consistent test-time loading
+        splits = {
+            "train": train_ds.indices,
+            "val": val_ds.indices,
+            "test": test_ds.indices
+        }
+        with open(os.path.join(out_dir, "split_indices.json"), "w") as f:
+            json.dump(splits, f)
 
         loaders = {
             "train": DataLoader(
@@ -321,3 +332,96 @@ if __name__ == "__main__":
     study.trials_dataframe().to_csv("optuna_results.csv")
 
     print("Best trial:", study.best_trial.params)
+
+    # After Optuna study is done
+    print("Loading best model for uncertainty reporting...")
+    # load main config
+    cfg = yaml.safe_load(open(args.config))
+    # setup device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # locate best trial run directory
+    trial_dirs = glob.glob(os.path.join(cfg["logging"]["output_root"], f"dihed_*_trial{study.best_trial.number}"))
+    best_dir = sorted(trial_dirs)[-1]
+    # load trial-specific config
+    cfg_trial = yaml.safe_load(open(os.path.join(best_dir, "used_config.yml")))
+    # build model from best config
+    mcfg = cfg_trial["model"]
+    encoder = DimeNetPPEncoder(
+        hidden_channels=mcfg["hidden_channels"],
+        out_channels=mcfg["out_channels"],
+        num_blocks=mcfg["num_blocks"],
+        num_spherical=mcfg["num_spherical"],
+        num_radial=mcfg["num_radial"],
+        cutoff=mcfg["cutoff"],
+    )
+    model = SiameseDimeNet(
+        encoder=encoder,
+        fusion=mcfg["fusion"],
+        dropout=mcfg["dropout"],
+    ).to(device)
+    # load best model weights
+    best_model_path = os.path.join(best_dir, "best_dimenet_model_manual.pt")
+    model.load_state_dict(torch.load(best_model_path, map_location=device))
+    model.eval()
+    # prepare test loader
+    dcfg = cfg_trial["data"]
+    dataset = EquiMultiMolDataset(
+        root=dcfg["root"],
+        sdf_folder=dcfg["sdf_folder"],
+        target_csv=dcfg["target_csv"],
+        input_type=dcfg["input_types"],
+        target_columns=dcfg["target_columns"],
+        keep_hs=dcfg["keep_hs"],
+        sanitize=dcfg["sanitize"],
+        force_reload=dcfg["force_reload"],
+    )
+    n = len(dataset)
+    g = torch.Generator().manual_seed(cfg_trial["training"]["seed"])
+    # Load saved split indices for consistent test set
+    with open(os.path.join(best_dir, "split_indices.json"), "r") as f:
+        splits = json.load(f)
+    test_ds = Subset(dataset, splits["test"])
+    test_loader = DataLoader(test_ds,
+                            batch_size=cfg_trial["training"]["batch_size"],
+                            shuffle=False,
+                            follow_batch=["z_s", "z_t"],
+                            generator=g)
+    loaders = {"test": test_loader}
+
+    results = []
+    with torch.no_grad():
+        for batch in tqdm(loaders["test"], desc="Test evaluation"):
+            batch = batch.to(device)
+            mu, kappa = model(batch)
+            # mu is predicted angle (in radians), kappa is uncertainty
+            true_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+            for m, k, t in zip(mu.cpu().numpy(), kappa.cpu().numpy(), true_angle.cpu().numpy()):
+                results.append({"pred_angle_rad": m, "pred_kappa": k, "true_angle_rad": t})
+
+    results_df = pd.DataFrame(results)
+    results_df.to_csv("test_predictions_with_uncertainty.csv", index=False)
+    print("Saved uncertainty predictions to test_predictions_with_uncertainty.csv")
+
+    # Compute and log kappa uncertainty summary to WandB
+    kappa_vals = results_df["pred_kappa"].values
+    angle_errs = np.abs(np.arctan2(np.sin(results_df["pred_angle_rad"] - results_df["true_angle_rad"]),
+                                np.cos(results_df["pred_angle_rad"] - results_df["true_angle_rad"])))
+    mean_kappa = np.mean(kappa_vals)
+    median_kappa = np.median(kappa_vals)
+    iqr_kappa = np.percentile(kappa_vals, [25, 75])
+    mean_error_deg = np.mean(angle_errs) * 180 / np.pi
+
+    print(f"Mean kappa: {mean_kappa:.2f} (lower = more uncertainty)")
+    print(f"Median kappa: {median_kappa:.2f}, IQR: {iqr_kappa[0]:.2f} - {iqr_kappa[1]:.2f}")
+    print(f"Mean angular error: {mean_error_deg:.2f}°")
+
+    wandb.log({
+        "test/kappa_mean": mean_kappa,
+        "test/kappa_median": median_kappa,
+        "test/kappa_25%": iqr_kappa[0],
+        "test/kappa_75%": iqr_kappa[1],
+        "test/mean_angle_error_deg": mean_error_deg,
+        "test/kappa_hist": wandb.Histogram(kappa_vals),
+        "test/angle_error_hist": wandb.Histogram(angle_errs * 180 / np.pi),
+    })
+    
