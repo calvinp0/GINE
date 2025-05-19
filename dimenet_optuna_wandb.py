@@ -19,6 +19,7 @@ import time
 import pandas as pd
 import glob
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def save_experiment(config, metrics, out_dir):
@@ -192,8 +193,13 @@ def make_objective(config_path, disable_amp):
 
         # ── train/val loop ────────────────────────────────
         best_val_err = 1e9
+        initial_penalty = 0.2
+        final_penalty = 0.0
+        num_anneal_epochs = 15
         for epoch in range(1, tcfg["epochs"] + 1):
             # train
+            train_kappas = []  # collect per-sample train kappa values
+            train_errors = []  # collect per-sample train angular errors
             model.train()
             tot_loss, tot_err, count = 0, 0, 0
             for batch in tqdm(loaders["train"], desc="Training", leave=False):
@@ -208,7 +214,13 @@ def make_objective(config_path, disable_amp):
                         h_fused = model.fuse(h_s, h_t)
                         mu, kapp = model.head_mu_kappa(h_fused)
                         target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
-                        loss = loss_fn(mu=mu, target=target_angle, kappa=kapp)
+                        # Apply penalty to kappa
+                        penalty_weight = max(
+                            initial_penalty * (1 - (epoch / num_anneal_epochs)),
+                            final_penalty,
+                        )
+                        kappa_penalty = penalty_weight * torch.mean(torch.relu(kappa-2))
+                        loss = loss_fn(mu=mu, target=target_angle, kappa=kapp) + kappa_penalty
 
                     scaler.scale(loss).backward()
                     scaler.unscale_(opt)
@@ -218,7 +230,13 @@ def make_objective(config_path, disable_amp):
                 else:
                     target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
                     mu, kappa = model(batch)
-                    loss = loss_fn(mu=mu, target=target_angle, kappa=kappa)
+                    # Apply penalty to kappa
+                    penalty_weight = max(
+                        initial_penalty * (1 - (epoch / num_anneal_epochs)),
+                        final_penalty,
+                    )
+                    kappa_penalty = penalty_weight * torch.mean(torch.relu(kappa-2))
+                    loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     opt.step()
@@ -229,17 +247,18 @@ def make_objective(config_path, disable_amp):
                 tot_err += err.item() * b
                 count += b
                 
-                # Optional: print angles for debugging
-                angle1 = torch.atan2(batch.y[:, 0], batch.y[:, 1])  # your code now
-                angle2 = torch.atan2(batch.y[:, 1], batch.y[:, 0])  # swapped
-
-                print('Sanity check: angle1[0]', angle1[0], 'angle2[0]', angle2[0])
-
+                # record per-sample uncertainties and errors
+                err_samples = torch.abs(torch.atan2(torch.sin(mu - target_angle), torch.cos(mu - target_angle))) * 180.0 / torch.pi
+                train_kappas.extend(kappa.cpu().detach().numpy().tolist())
+                train_errors.extend(err_samples.cpu().detach().numpy().tolist())
+                
             tr_l, tr_e = tot_loss / count, tot_err / count
             # Log training error as user attr
             trial.set_user_attr("train_err", tr_e)
 
             # val
+            val_kappas = []  # collect per-sample validation kappa values
+            val_errors = []  # collect per-sample validation angular errors
             model.eval()
             tot_loss, tot_err, count = 0, 0, 0
             with torch.no_grad():
@@ -247,6 +266,10 @@ def make_objective(config_path, disable_amp):
                     batch = batch.to(device)
                     target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
                     mu, kappa = model(batch)
+                    val_kappas.extend(kappa.cpu().numpy().tolist())
+                    # record per-sample uncertainties and errors
+                    err_samples_val = torch.abs(torch.atan2(torch.sin(mu - target_angle), torch.cos(mu - target_angle))) * 180.0 / torch.pi
+                    val_errors.extend(err_samples_val.cpu().numpy().tolist())
                     l = loss_fn(mu=mu, target=target_angle, kappa=kappa)
                     err = metric_fn(mu, target_angle) * 180.0 / torch.pi
                     b = batch.y.size(0)
@@ -266,6 +289,18 @@ def make_objective(config_path, disable_amp):
                 f"LR={scheduler.get_last_lr()[0]:.2e}"
             )
 
+            # Compute kappa statistics
+            train_kappa_arr = np.array(train_kappas)
+            val_kappa_arr = np.array(val_kappas)
+            train_kappa_mean = train_kappa_arr.mean()
+            train_kappa_median = np.median(train_kappa_arr)
+            train_kappa_iqr = np.percentile(train_kappa_arr, [25, 75])
+            train_kappa_min, train_kappa_max = train_kappa_arr.min(), train_kappa_arr.max()
+            val_kappa_mean = val_kappa_arr.mean()
+            val_kappa_median = np.median(val_kappa_arr)
+            val_kappa_iqr = np.percentile(val_kappa_arr, [25, 75])
+            val_kappa_min, val_kappa_max = val_kappa_arr.min(), val_kappa_arr.max()
+
             # Log metrics to WandB
             wandb.log({
                 "epoch": epoch,
@@ -273,8 +308,34 @@ def make_objective(config_path, disable_amp):
                 "train_err": tr_e,
                 "val_loss": va_l,
                 "val_err": va_e,
-                "lr": scheduler.get_last_lr()[0]
+                "lr": scheduler.get_last_lr()[0],
+                # Histograms
+                "train_kappa_hist": wandb.Histogram(train_kappas),
+                "val_kappa_hist": wandb.Histogram(val_kappas),
+                # Summary stats
+                "train/kappa_mean": train_kappa_mean,
+                "train/kappa_median": train_kappa_median,
+                "train/kappa_25%": train_kappa_iqr[0],
+                "train/kappa_75%": train_kappa_iqr[1],
+                "train/kappa_min": train_kappa_min,
+                "train/kappa_max": train_kappa_max,
+                "val/kappa_mean": val_kappa_mean,
+                "val/kappa_median": val_kappa_median,
+                "val/kappa_25%": val_kappa_iqr[0],
+                "val/kappa_75%": val_kappa_iqr[1],
+                "val/kappa_min": val_kappa_min,
+                "val/kappa_max": val_kappa_max,
             })
+
+            # Scatter plot of kappa vs error
+            fig, ax = plt.subplots(figsize=(6,4))
+            ax.scatter(train_kappas, train_errors, alpha=0.3)
+            ax.set_xscale('log')
+            ax.set_xlabel('Train Kappa')
+            ax.set_ylabel('Train Error (deg)')
+            ax.set_title(f'Epoch {epoch}: Kappa vs Error')
+            wandb.log({"train/kappa_error_scatter": wandb.Image(fig)})
+            plt.close(fig)
 
             if va_e < best_val_err:
                 best_val_err = va_e
@@ -415,6 +476,17 @@ if __name__ == "__main__":
     print(f"Median kappa: {median_kappa:.2f}, IQR: {iqr_kappa[0]:.2f} - {iqr_kappa[1]:.2f}")
     print(f"Mean angular error: {mean_error_deg:.2f}°")
 
+    # Optional: Scatter plot of Kappa vs Error
+    plt.figure(figsize=(10, 6))
+    plt.scatter(kappa_vals, angle_errs * 180 / np.pi, alpha=0.5)
+    plt.xscale('log')
+    plt.xlabel("Predicted Kappa (Uncertainty)")
+    plt.ylabel("Angular Error (degrees)")
+    plt.title("Kappa vs Angular Error")
+    plt.grid(True)
+    plt.savefig("kappa_vs_error_scatter.png")
+    plt.close()
+
     wandb.log({
         "test/kappa_mean": mean_kappa,
         "test/kappa_median": median_kappa,
@@ -424,4 +496,3 @@ if __name__ == "__main__":
         "test/kappa_hist": wandb.Histogram(kappa_vals),
         "test/angle_error_hist": wandb.Histogram(angle_errs * 180 / np.pi),
     })
-    

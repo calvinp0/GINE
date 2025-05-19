@@ -200,8 +200,9 @@ class SiameseDimeNet(torch.nn.Module):
 
     def head_mu_kappa(self, h_fused):
         raw = self.head(h_fused)
-        mu    = raw[:, 0]            # This is a (possibly unbounded) angle in radians
+        mu    = raw[:, 0]            # unbounded angle prediction (fine)
         kappa = F.softplus(raw[:, 1]) + 1e-3
+        kappa = torch.clamp(kappa, max=20)  # or max=50, depending on what works for your loss scale
         return mu, kappa
 
     def forward(self, batch):
