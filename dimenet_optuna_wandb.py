@@ -206,40 +206,49 @@ def make_objective(config_path, disable_amp):
                 batch = batch.to(device)
                 opt.zero_grad()
 
-                if use_amp:
-                    with autocast(enabled=False, device_type=device.type):
-                        h_s, h_t = model.encode(batch)
+                try:
+                    if use_amp:
+                        with autocast(enabled=False, device_type=device.type):
+                            h_s, h_t = model.encode(batch)
 
-                    with autocast(device_type=device.type):
-                        h_fused = model.fuse(h_s, h_t)
-                        mu, kapp = model.head_mu_kappa(h_fused)
+                        with autocast(device_type=device.type):
+                            h_fused = model.fuse(h_s, h_t)
+                            mu, kapp = model.head_mu_kappa(h_fused)
+                            target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+                            # Apply penalty to kappa
+                            penalty_weight = max(
+                                initial_penalty * (1 - (epoch / num_anneal_epochs)),
+                                final_penalty,
+                            )
+                            kappa_penalty = penalty_weight * torch.mean(torch.relu(kapp-2))
+                            loss = loss_fn(mu=mu, target=target_angle, kappa=kapp) + kappa_penalty
+
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(opt)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scaler.step(opt)
+                        scaler.update()
+                    else:
                         target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
+                        mu, kappa = model(batch)
                         # Apply penalty to kappa
                         penalty_weight = max(
                             initial_penalty * (1 - (epoch / num_anneal_epochs)),
                             final_penalty,
                         )
                         kappa_penalty = penalty_weight * torch.mean(torch.relu(kappa-2))
-                        loss = loss_fn(mu=mu, target=target_angle, kappa=kapp) + kappa_penalty
-
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    scaler.step(opt)
-                    scaler.update()
-                else:
-                    target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
-                    mu, kappa = model(batch)
-                    # Apply penalty to kappa
-                    penalty_weight = max(
-                        initial_penalty * (1 - (epoch / num_anneal_epochs)),
-                        final_penalty,
-                    )
-                    kappa_penalty = penalty_weight * torch.mean(torch.relu(kappa-2))
-                    loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    opt.step()
+                        loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        opt.step()
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        import gc, torch
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        raise optuna.TrialPruned()
+                    else:
+                        raise
 
                 err = metric_fn(mu, target_angle) * 180.0 / torch.pi
                 b = batch.y.size(0)
@@ -353,6 +362,10 @@ def make_objective(config_path, disable_amp):
         trial.set_user_attr("val_err", va_e)
         # Finish WandB run for this trial
         wandb.finish()
+        # clear GPU memory after each trial to reduce fragmentation
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
         return va_e
     return objective
 
