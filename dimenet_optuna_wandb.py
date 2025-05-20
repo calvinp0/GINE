@@ -243,7 +243,7 @@ def make_objective(config_path, disable_amp):
                         opt.step()
                 except RuntimeError as e:
                     if "out of memory" in str(e):
-                        import gc, torch
+                        import gc
                         gc.collect()
                         torch.cuda.empty_cache()
                         raise optuna.TrialPruned()
