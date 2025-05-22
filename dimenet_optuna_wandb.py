@@ -19,6 +19,7 @@ import time
 import pandas as pd
 import glob
 import numpy as np
+from split_utils import get_or_make_splits
 import matplotlib.pyplot as plt
 
 
@@ -31,7 +32,7 @@ def save_experiment(config, metrics, out_dir):
     print(f"👉 Saved experiment to {fname}")
 
 
-def make_objective(config_path, disable_amp):
+def make_objective(config_path, disable_amp, splits):
     """
     Create an Optuna objective function that loads config from the given path for each trial.
     """
@@ -61,8 +62,8 @@ def make_objective(config_path, disable_amp):
         mcfg["dropout"] = trial.suggest_float("dropout", 0.0, 0.5)
 
         tcfg = cfg["training"]
-        tcfg["lr"] = trial.suggest_loguniform("lr", 1e-5, 1e-3)
-        tcfg["weight_decay"] = trial.suggest_loguniform("weight_decay", 1e-6, 1e-4)
+        tcfg["lr"] = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        tcfg["weight_decay"] = trial.suggest_float("weight_decay", 1e-6, 1e-4, log=True)
         tcfg["batch_size"] = trial.suggest_categorical("batch_size", [32, 64, 128])
         tcfg["epochs"] = 200
 
@@ -145,18 +146,11 @@ def make_objective(config_path, disable_amp):
             force_reload=dcfg["force_reload"],
         )
 
-        n = len(dataset)
         g = torch.Generator().manual_seed(cfg["training"]["seed"])
-        t, v, te = int(0.8 * n), int(0.1 * n), n - int(0.8 * n) - int(0.1 * n)
-        train_ds, val_ds, test_ds = random_split(dataset, [t, v, te], generator=g)
-        # Save split indices for consistent test-time loading
-        splits = {
-            "train": train_ds.indices,
-            "val": val_ds.indices,
-            "test": test_ds.indices
-        }
-        with open(os.path.join(out_dir, "split_indices.json"), "w") as f:
-            json.dump(splits, f)
+
+        train_ds = Subset(dataset, splits["train"])
+        val_ds   = Subset(dataset, splits["val"])
+        test_ds  = Subset(dataset, splits["test"])
 
         loaders = {
             "train": DataLoader(
@@ -196,6 +190,8 @@ def make_objective(config_path, disable_amp):
         initial_penalty = 0.2
         final_penalty = 0.0
         num_anneal_epochs = 15
+        # BEFORE the epoch loop
+        bad_epochs = 0
         for epoch in range(1, tcfg["epochs"] + 1):
             # train
             train_kappas = []  # collect per-sample train kappa values
@@ -213,15 +209,15 @@ def make_objective(config_path, disable_amp):
 
                         with autocast(device_type=device.type):
                             h_fused = model.fuse(h_s, h_t)
-                            mu, kapp = model.head_mu_kappa(h_fused)
+                            mu, kappa = model.head_mu_kappa(h_fused)
                             target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
                             # Apply penalty to kappa
                             penalty_weight = max(
                                 initial_penalty * (1 - (epoch / num_anneal_epochs)),
                                 final_penalty,
                             )
-                            kappa_penalty = penalty_weight * torch.mean(torch.relu(kapp-2))
-                            loss = loss_fn(mu=mu, target=target_angle, kappa=kapp) + kappa_penalty
+                            kappa_penalty = penalty_weight * torch.mean(torch.relu(2 - kappa))
+                            loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
 
                         scaler.scale(loss).backward()
                         scaler.unscale_(opt)
@@ -236,7 +232,9 @@ def make_objective(config_path, disable_amp):
                             initial_penalty * (1 - (epoch / num_anneal_epochs)),
                             final_penalty,
                         )
-                        kappa_penalty = penalty_weight * torch.mean(torch.relu(kappa-2))
+                        # no-AMP branch penalty
+                        kappa_penalty = penalty_weight * torch.mean(torch.relu(2 - kappa))
+
                         loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -286,6 +284,23 @@ def make_objective(config_path, disable_amp):
                     tot_err += err.item() * b
                     count += b
             va_l, va_e = tot_loss / count, tot_err / count
+
+            # === Hybrid Optuna + manual patience pruning snippet ===
+            # Place this inside the epoch loop, right after computing va_e
+
+            # --- 1. Report to Optuna's MedianPruner -----------------------------
+            trial.report(va_e, epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+            if va_e < best_val_err:
+                best_val_err = va_e
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+            if bad_epochs >= 20:
+                raise optuna.TrialPruned()
+
             # Log validation loss as user attr
             trial.set_user_attr("val_loss", va_l)
 
@@ -378,8 +393,19 @@ if __name__ == "__main__":
     parser.add_argument("--no-amp", action="store_true", help="Disable AMP even if CUDA is available")
     args = parser.parse_args()
 
-    # Use a closure to pass config path and amp flag into the objective
-    objective_fn = make_objective(args.config, args.no_amp)
+    cfg = yaml.safe_load(open(args.config))       # NEW  (needed before we build the split)
+    # --- build dataset ONCE and create/load split file ------------------------
+    dataset_once = EquiMultiMolDataset(**cfg["data"])   # NEW
+    split_path   = os.path.join(cfg["logging"]["output_root"],
+                                "split_indices.json")    # NEW
+    splits = get_or_make_splits(dataset_once,
+                                cfg["training"]["seed"],
+                                split_path)              # NEW
+    del dataset_once                                      # optional, free RAM   # NEW
+    # -------------------------------------------------------------------------
+
+    # Objective now gets a third argument
+    objective_fn = make_objective(args.config, args.no_amp, splits)   # NEW
 
     # Create a shared study for parallel executions
     study = optuna.create_study(
@@ -387,6 +413,7 @@ if __name__ == "__main__":
         direction="minimize",
         storage="sqlite:///dimenet_hpo.db",
         load_if_exists=True,
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=15)
     )
 
     # Optimize using the closure-based objective
