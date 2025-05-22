@@ -23,9 +23,9 @@ training:
 
 data:
   root:            data/equi_dataset
-  sdf_folder:      /home/calvin/code/chemprop_phd_customised/habnet/data/processed/sdf_data
-  target_csv:      /home/calvin/code/chemprop_phd_customised/habnet/data/processed/target_data/target_data_sin_cos.csv
-  input_types:     ['r1h', 'r2h']
+  sdf_folder:      /home/calvin.p/Code/Data/sdf_data
+  target_csv:      /home/calvin/Code/Data/target_data/target_data_sin_cos.csv
+  input_type:     ['r1h', 'r2h']
   target_columns:  ['psi_1_dihedral_sin', 'psi_1_dihedral_cos']
   keep_hs:         true
   sanitize:        false
