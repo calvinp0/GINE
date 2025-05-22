@@ -12,6 +12,10 @@ import hashlib
 from typing import Union, Sequence, Any, Callable, Optional
 from pathlib import Path
 import numpy as np
+import ast
+import periodictable
+from typing import List, Tuple
+
 
 from torch_geometric.data import Data, Batch
 
@@ -25,6 +29,47 @@ GAMMA_SBF = 10.0
 # Generate radial basis centers and angular basis centers
 rbf_mu = np.linspace(0, CUTOFF, RBF_COUNT)
 sbf_mu = np.linspace(0, np.pi, SBF_COUNT)
+
+# choose offsets that keep everything < 95
+OFFSET_ACCEPTOR = 50          # 50–85 safe range
+OFFSET_HYDROGEN = 70
+OFFSET_DONOR    = 60
+
+
+
+STAR2TAG = {
+    "*0": 1,      # acceptor heavy (or however you choose)
+    "*1": 1,      # acceptor heavy – some files use different subsets
+    "*2": 2,      # transferring H
+    "*3": 3,      # donor heavy
+    "*4": 3,      # donor heavy (adjacent)
+    # 0 means “no special role”
+}
+
+def extract_tags(df: pd.DataFrame, reaction_id, z) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns two 1-D tensors of length N_atoms:
+        z      – atomic numbers (int64)
+        tag_id – 0..4  (int64)
+    """
+
+    try:
+        props_str = df.loc[df['reaction'] == reaction_id, 'mol_properties'].iloc[0]
+    except IndexError:
+        raise KeyError(f"reaction '{reaction_id}' not found in DataFrame")
+
+    props = ast.literal_eval(props_str)         # dict-of-dicts, keys = atom indices
+
+    tag_tensor = torch.zeros_like(z, dtype=torch.long)
+
+    # 2) iterate over the (idx, meta) pairs directly
+    for idx_str, meta in props.items():
+        idx  = int(idx_str)                     # '7' → 7
+        star = meta.get('label')                # '*2', '*3', …
+        tag_tensor[idx] = STAR2TAG.get(star, 0)
+
+    return tag_tensor
+
 
 class PairData(Data):
     r"""Holds two independent graphs (source → _s, target → _t)."""
@@ -498,3 +543,145 @@ def siamese_collate(batch_list):
     batch_list_s = [d for d in batch_list]
     batch_s = Batch.from_data_list(batch_list_s)
     return batch_s
+
+
+class EquiDataset(InMemoryDataset):
+    """
+    Holds one molecular 3D coords (source) plus label y and id.
+    """
+    def __init__(self, root = None, 
+                geoms_csv: Union[str, list[str]] = None,
+                sdf_folder: Union[str, list[str]] = None,
+                target_csv: str = None,
+                target_columns: list[str] = None,
+                transform = None, pre_transform = None, pre_filter = None, log = True, force_reload = False):
+        
+        # Store config
+        self.geoms_csv      = geoms_csv
+        self.target_csv     = target_csv
+        self.target_columns = target_columns
+        self.force_reload   = force_reload
+        sdf_folder     = [sdf_folder] if isinstance(sdf_folder, str) else list(sdf_folder)
+        # Gather all .sdf paths
+        self.sdf_paths = []
+        for sdf in sdf_folder:
+            p = Path(sdf)
+            if p.is_dir():
+                self.sdf_paths += sorted(p.glob('*.sdf'))
+            elif p.suffix.lower() == '.sdf':
+                self.sdf_paths.append(p)
+
+        self.df = self.read_all_sdfs()
+        # Load geometry DataFrame
+        if isinstance(self.geoms_csv, str):
+            self.geoms_df = pd.read_csv(self.geoms_csv, index_col=False)
+        elif isinstance(self.geoms_csv, list):
+            self.geoms_df = pd.concat([pd.read_csv(f) for f in self.geoms_csv])
+        else:
+            raise ValueError("geoms_csv must be a string or a list of strings")
+        self.geoms_df = self.geoms_df.set_index('rxn_id')
+        # Load target DataFrame
+        self.target_df = pd.read_csv(self.target_csv).set_index('rxn')
+
+
+        # Compute cache hash
+        h = hashlib.sha1()
+        h.update(str(self.geoms_csv).encode())
+        h.update(str(os.path.getmtime(self.target_csv)).encode())
+        h.update(','.join(self.target_columns).encode())
+        self.cache_hash = h.hexdigest()
+
+        super().__init__(root, transform, pre_transform, force_reload=force_reload)
+
+        # Force reload if requested
+        if self.force_reload and os.path.exists(self.processed_paths[0]):
+            os.remove(self.processed_paths[0])
+            self.process()
+        
+        self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
+
+    @property
+    def raw_file_names(self):
+        # No raw downloads
+        return []
+    
+    @property
+    def processed_file_names(self):
+        # Unique file per hash
+        return [f'equi_single_{self.cache_hash}.pt']
+    
+    def download(self):
+        # Nothing to download
+        pass
+
+    def process(self):
+        data_list = []
+
+        for rxn_id, row in self.geoms_df.iterrows():
+
+            # Get the geometry coords
+            coords = row['coords']
+            coords = ast.literal_eval(coords)
+            pos = torch.tensor(coords, dtype=torch.float)
+            symbols = ast.literal_eval(row['symbols'])
+            z_list = [periodictable.elements.symbol(s).number for s in symbols]
+            z = torch.tensor(z_list, dtype=torch.long)
+
+            # Get the target value
+            if rxn_id not in self.target_df.index:
+                print(f"Skipping {rxn_id}: not found in target CSV")
+                continue
+            sin_cos = self.target_df.loc[rxn_id, self.target_columns].values  # [sin, cos]
+            y       = torch.tensor(np.array(sin_cos), dtype=torch.float)            # → shape [2]
+            # Create the data object
+            tags = extract_tags(self.df, rxn_id, z)
+            z = self.apply_offset(z, tags)
+            data = Data(
+                z=z,
+                # tag_id=tags,
+                pos=pos,
+                y=y.unsqueeze(0),
+                id=rxn_id
+            )
+            data_list.append(data)
+
+        # Guard against empty
+        if len(data_list) == 0:
+            raise RuntimeError(
+                "No valid examples found in process().\n"
+                f"– CSV RXNs: {list(self.target_df.index)}\n"
+            )
+        print(f"  → Built {len(data_list)} EquiData examples")
+        # Collate and save
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
+        print(f"Saved processed data to {self.processed_paths[0]}") 
+
+
+    def read_all_sdfs(self):
+        """
+        Read all SDF files in the folder and gather mol properties from TS.
+        Use Pandas Tools to read the SDF files and extract the properties.
+        """
+        from rdkit import Chem
+        from rdkit.Chem import PandasTools
+        from tqdm import tqdm
+
+        mol_props_df = pd.DataFrame()
+        for sdf_path in self.sdf_paths:
+            props = PandasTools.LoadSDF(sdf_path, includeFingerprints=False)
+            # Append the properties to the DataFrame
+            mol_props_df = pd.concat([mol_props_df, props], ignore_index=True)
+        # Remove typpes that are not 'ts'
+        mol_props_df = mol_props_df[mol_props_df['type'] == 'ts']
+        return mol_props_df
+
+    def apply_offset(self, z, tag_id):
+        z = z.clone()
+        z[tag_id == 1] += OFFSET_ACCEPTOR
+        z[tag_id == 2] += OFFSET_HYDROGEN
+        z[tag_id == 3] += OFFSET_DONOR
+        return z
+
+
+

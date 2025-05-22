@@ -210,3 +210,59 @@ class SiameseDimeNet(torch.nn.Module):
         h_s, h_t    = self.encode(batch)
         h_fused     = self.fuse(h_s, h_t)
         return self.head_mu_kappa(h_fused)
+    
+
+
+
+class DimeNet(torch.nn.Module):
+    def __init__(
+        self,
+        encoder,  # DimeNetPPEncoder or compatible GNN
+        dropout: float = 0.2,
+        head_hidden_dims=[256, 128],  # allow multiple head layers
+        uncertainty: bool = False,  # if True, return mu and kappa
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.uncertainty = uncertainty
+
+        # Output dimension of encoder (usually encoder.out_dim)
+        D = encoder.out_dim
+
+        # Build head MLP: input dim = D, followed by head_hidden_dims, and output 2 (mu, kappa)
+        dims = [D, *head_hidden_dims, 2]
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(torch.nn.Linear(dims[i], dims[i + 1]))
+            if i < len(dims) - 2:
+                layers += [torch.nn.ReLU(), torch.nn.Dropout(dropout)]
+        self.head = torch.nn.Sequential(*layers)
+
+    def encode(self, batch):
+        # batch should have z, pos, batch (if batched)
+        data = Data(z=batch.z, pos=batch.pos, batch=batch.batch)
+        return self.encoder(data)
+
+    def head_and_norm(self, h):
+        raw = self.head(h)
+        return F.normalize(raw, p=2, dim=-1, eps=1e-8)
+
+    def head_mu_kappa(self, h):
+        raw = self.head(h)
+        mu    = raw[:, 0]
+        kappa = F.softplus(raw[:, 1]) + 1e-3
+        kappa = torch.clamp(kappa, max=20)
+        return mu, kappa
+
+    def forward(self, batch):
+        # Forward pass: encode, then head
+        h = self.encode(batch)
+        if self.uncertainty:
+            return self.head_mu_kappa(h)
+        else:
+            # If uncertainty is False, just return the normalized output
+            return self.head_and_norm(h)
+
+
+
+
