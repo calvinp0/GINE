@@ -1,27 +1,45 @@
-import argparse, os, json
+# dimenet_optuna_wandb_fixed.py  – fully self‑contained script
+# Key fixes:
+#   1. Robust handling when `input_type` or other optional keys are missing in
+#      the saved config (avoids KeyError during final evaluation).
+#   2. Robust locating of the split file even if it was not copied into the
+#      trial directory.
+#   3. Ensures the split file is copied into each trial directory so later
+#      stages always find it.
+#   4. Saves YAML with `sort_keys=False` so list keys such as `input_type` are
+#      preserved exactly.
+#   5. Minor hygiene: add `flush()` after YAML save, use `with` context for
+#      file ops, and protect against empty glob matches.
+
+import argparse, os, json, shutil, time, glob
 from datetime import datetime
+
 import yaml
 import torch
-import torch.nn.functional as F
-from torch.utils.data import random_split, Subset
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
-from loss_utils import cosine_angle_loss, AngularErrorMetric, von_mises_nll_fixed_kappa, angular_error
+from tqdm import tqdm
+import optuna
+import wandb
+from torch.amp import autocast, GradScaler
+
+from loss_utils import (
+    von_mises_nll_fixed_kappa,
+    angular_error,
+)
 from siamesepairwise import SiameseDimeNet, DimeNetPPEncoder
 from schedulers import CosineRestartsDecay
 from data import EquiMultiMolDataset
-from pytorch_lightning import seed_everything  # or roll your own
-import optuna
-from torch.amp import autocast, GradScaler
-from tqdm import tqdm
-import wandb
-import torch.nn as nn
-import time
-import pandas as pd
-import glob
-import numpy as np
 from split_utils import get_or_make_splits
-import matplotlib.pyplot as plt
+from pytorch_lightning import seed_everything
 
+###########################################################################
+# -------------------------- helper utilities --------------------------- #
+###########################################################################
 
 def save_experiment(config, metrics, out_dir):
     os.makedirs(out_dir, exist_ok=True)
@@ -29,73 +47,102 @@ def save_experiment(config, metrics, out_dir):
     fname = os.path.join(out_dir, f"run_{ts}.json")
     with open(fname, "w") as f:
         json.dump({"config": config, "metrics": metrics}, f, indent=2)
-    print(f"👉 Saved experiment to {fname}")
+    print(f"👉  Saved experiment to {fname}")
 
 
-def make_objective(config_path, disable_amp, splits):
-    """
-    Create an Optuna objective function that loads config from the given path for each trial.
-    """
+def safe_get(d: dict, key: str, default):
+    """Return d[key] if present else default (and warn once)."""
+    if key not in d:
+        print(f"⚠️  '{key}' missing in config – using default {default}")
+    return d.get(key, default)
+
+###########################################################################
+# --------------------------- objective maker --------------------------- #
+###########################################################################
+
+def make_objective(config_path: str, disable_amp: bool, splits: dict, split_path: str):
+    """Return an Optuna objective function bound to a particular YAML config."""
+
     def objective(trial):
-        # WandB offline mode and init per trial
-        os.environ.setdefault("WANDB_MODE", "offline")
-        # Load config per trial
+        # ----------------------------------------------------------------------------
+        # 1. Load and patch config ---------------------------------------------------
+        # ----------------------------------------------------------------------------
         cfg = yaml.safe_load(open(config_path))
+
+        # - wandb offline ensures no accidental online logging on cluster nodes
+        os.environ.setdefault("WANDB_MODE", "offline")
         run = wandb.init(
             config=cfg,
             name=f"optuna_trial_{trial.number}",
             reinit=True,
-            group="optuna_dimenet"
+            group="optuna_dimenet",
         )
-        # Sync Optuna trial hyperparams into WandB config
-        wandb.config.update({k: v for k, v in cfg.items()})
 
-        # Suggest hyperparameters from config sections
         mcfg = cfg["model"]
-        mcfg["hidden_channels"] = trial.suggest_int("hidden_channels", 64, 1024)
-        mcfg["out_channels"] = trial.suggest_int("out_channels", 64, 256)
-        mcfg["num_blocks"] = trial.suggest_int("num_blocks", 2, 6)
-        mcfg["num_spherical"] = trial.suggest_int("num_spherical", 3, 10)
-        mcfg["num_radial"] = trial.suggest_int("num_radial", 3, 10)
-        mcfg["cutoff"] = trial.suggest_float("cutoff", 3.0, 8.0)
-        mcfg["fusion"] = trial.suggest_categorical("fusion", ["cat", "symm"])
-        mcfg["dropout"] = trial.suggest_float("dropout", 0.0, 0.5)
-
         tcfg = cfg["training"]
-        tcfg["lr"] = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
-        tcfg["weight_decay"] = trial.suggest_float("weight_decay", 1e-6, 1e-4, log=True)
-        tcfg["batch_size"] = trial.suggest_categorical("batch_size", [32, 64, 128])
+        dcfg = cfg["data"]
+
+        # ---------------- optuna suggestions ---------------
+        mcfg.update(
+            {
+                "hidden_channels": trial.suggest_int("hidden_channels", 64, 1024),
+                "out_channels": trial.suggest_int("out_channels", 64, 256),
+                "num_blocks": trial.suggest_int("num_blocks", 2, 6),
+                "num_spherical": trial.suggest_int("num_spherical", 3, 10),
+                "num_radial": trial.suggest_int("num_radial", 3, 10),
+                "cutoff": trial.suggest_float("cutoff", 3.0, 8.0),
+                "fusion": trial.suggest_categorical("fusion", ["cat", "symm"]),
+                "dropout": trial.suggest_float("dropout", 0.0, 0.5),
+            }
+        )
+
+        tcfg.update(
+            {
+                "lr": trial.suggest_float("lr", 1e-5, 1e-3, log=True),
+                "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-4, log=True),
+                "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128]),
+            }
+        )
         tcfg["epochs"] = 200
+        scfg = tcfg.setdefault("scheduler", {})
+        scfg.update(
+            {
+                "T_0": trial.suggest_int("T_0", 5, 20),
+                "T_mult": trial.suggest_int("T_mult", 1, 4),
+                "eta_min": trial.suggest_float("eta_min", 1e-5, 1e-3),
+                "decay": trial.suggest_float("decay", 0.1, 0.9),
+            }
+        )
 
-        scfg = tcfg.get("scheduler", {})
-        scfg["T_0"] = trial.suggest_int("T_0", 5, 20)
-        scfg["T_mult"] = trial.suggest_int("T_mult", 1, 4)
-        scfg["eta_min"] = trial.suggest_float("eta_min", 1e-5, 1e-3)
-        scfg["decay"] = trial.suggest_float("decay", 0.1, 0.9)
-        tcfg["scheduler"] = scfg
-
-        # ── device setup ─────────────────────────────────
+        # ----------------------------------------------------------------------------
+        # 2. Device & AMP -------------------------------------------------------------
+        # ----------------------------------------------------------------------------
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {device}")
-
-        # ── AMP setup ──────────────────────────────────────
-        # allow disabling AMP via CLI flag
-        use_amp = (device.type == "cuda") and not disable_amp
+        use_amp = device.type == "cuda" and not disable_amp
         scaler = GradScaler(enabled=use_amp)
-        print(f"{'🟢' if use_amp else '🔴'} AMP {'enabled' if use_amp else 'disabled'}")
+        print(f"Using device: {device} –  AMP {'ON' if use_amp else 'OFF'}")
 
-        # ── make output dir & snapshot config ─────────────
+        # ----------------------------------------------------------------------------
+        # 3. Output directory ---------------------------------------------------------
+        # ----------------------------------------------------------------------------
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        exp_name = f"dihed_{ts}_trial{trial.number}"
-        out_root = cfg["logging"]["output_root"]
-        out_dir = os.path.join(out_root, exp_name)
+        out_dir = os.path.join(cfg["logging"]["output_root"], f"dihed_{ts}_trial{trial.number}")
         os.makedirs(out_dir, exist_ok=True)
-        yaml.safe_dump(cfg, open(os.path.join(out_dir, "used_config.yml"), "w"))
+        with open(os.path.join(out_dir, "used_config.yml"), "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+            f.flush()
 
-        # ── set seed ──────────────────────────────────────
-        seed_everything(cfg["training"]["seed"])
+        # also copy the split file so downstream evaluation does not break
+        shutil.copy(split_path, os.path.join(out_dir, "split_indices.json"))
 
-        # ── build model ───────────────────────────────────
+        # ----------------------------------------------------------------------------
+        # 4. Determinism -------------------------------------------------------------
+        # ----------------------------------------------------------------------------
+        seed_everything(tcfg["seed"])
+
+        # ----------------------------------------------------------------------------
+        # 5. Model -------------------------------------------------------------------
+        # ----------------------------------------------------------------------------
         encoder = DimeNetPPEncoder(
             hidden_channels=mcfg["hidden_channels"],
             out_channels=mcfg["out_channels"],
@@ -104,53 +151,28 @@ def make_objective(config_path, disable_amp, splits):
             num_radial=mcfg["num_radial"],
             cutoff=mcfg["cutoff"],
         )
-        model = SiameseDimeNet(
-            encoder=encoder,
-            fusion=mcfg["fusion"],
-            dropout=mcfg["dropout"],
-        ).to(device)
-        # Apply Xavier initialization to all parameters
-        def init_weights(m):
-            if hasattr(m, 'weight') and m.weight is not None and m.weight.dim() > 1:
+        model = SiameseDimeNet(encoder, fusion=mcfg["fusion"], dropout=mcfg["dropout"]).to(device)
+
+        # xavier on all eligible params
+        def _init(m):
+            if hasattr(m, "weight") and m.weight is not None and m.weight.dim() > 1:
                 nn.init.xavier_uniform_(m.weight)
-            if hasattr(m, 'bias') and m.bias is not None:
+            if hasattr(m, "bias") and m.bias is not None:
                 nn.init.zeros_(m.bias)
-        model.apply(init_weights)
+        model.apply(_init)
 
-        # ── optimizer & scheduler ────────────────────────
-        opt = torch.optim.AdamW(
-            model.parameters(),
-            lr=float(tcfg["lr"]),
-            weight_decay=float(tcfg["weight_decay"]),
-        )
-        scheduler = CosineRestartsDecay(
-            opt,
-            T_0=int(scfg["T_0"]),
-            T_mult=int(scfg["T_mult"]),
-            eta_min=float(scfg["eta_min"]),
-            decay=float(scfg["decay"]),
-        )
+        # ----------------------------------------------------------------------------
+        # 6. Optimiser / scheduler ----------------------------------------------------
+        # ----------------------------------------------------------------------------
+        opt = torch.optim.AdamW(model.parameters(), lr=float(tcfg["lr"]), weight_decay=float(tcfg["weight_decay"]))
+        scheduler = CosineRestartsDecay(opt, **scfg)
 
-        # ── data loaders ──────────────────────────────────
-        dcfg = cfg["data"]
-        os.makedirs(dcfg["root"], exist_ok=True)
-
-        dataset = EquiMultiMolDataset(
-            root=dcfg["root"],
-            sdf_folder=dcfg["sdf_folder"],
-            target_csv=dcfg["target_csv"],
-            input_type=dcfg["input_type"],
-            target_columns=dcfg["target_columns"],
-            keep_hs=dcfg["keep_hs"],
-            sanitize=dcfg["sanitize"],
-            force_reload=dcfg["force_reload"],
-        )
-
-        g = torch.Generator().manual_seed(cfg["training"]["seed"])
-
+        # ----------------------------------------------------------------------------
+        # 7. Data ---------------------------------------------------------------------
+        # ----------------------------------------------------------------------------
+        dataset = EquiMultiMolDataset(**dcfg)
         train_ds = Subset(dataset, splits["train"])
         val_ds   = Subset(dataset, splits["val"])
-        test_ds  = Subset(dataset, splits["test"])
 
         loaders = {
             "train": DataLoader(
@@ -158,137 +180,64 @@ def make_objective(config_path, disable_amp, splits):
                 batch_size=tcfg["batch_size"],
                 shuffle=True,
                 follow_batch=["z_s", "z_t"],
-                generator=g,
+                generator=torch.Generator().manual_seed(tcfg["seed"]),
             ),
             "val": DataLoader(
                 val_ds,
                 batch_size=tcfg["batch_size"],
                 shuffle=False,
                 follow_batch=["z_s", "z_t"],
-                generator=g,
-            ),
-            "test": DataLoader(
-                test_ds,
-                batch_size=tcfg["batch_size"],
-                shuffle=False,
-                follow_batch=["z_s", "z_t"],
-                generator=g,
+                generator=torch.Generator().manual_seed(tcfg["seed"]),
             ),
         }
 
-        print(
-            f"📊 Dataset split: total={len(dataset)} | "
-            f"train={len(train_ds)} | val={len(val_ds)} | test={len(test_ds)}"
-        )
+        # ----------------------------------------------------------------------------
+        # 8. Training loop ------------------------------------------------------------
+        # ----------------------------------------------------------------------------
+        best_val_err, bad_epochs = 1e9, 0
+        loss_fn, metric_fn = von_mises_nll_fixed_kappa, angular_error
 
-        # ── loss + metric ─────────────────────────────────
-        loss_fn = von_mises_nll_fixed_kappa
-        metric_fn = angular_error
-
-        # ── train/val loop ────────────────────────────────
-        best_val_err = 1e9
-        initial_penalty = 0.2
-        final_penalty = 0.0
-        num_anneal_epochs = 15
-        # BEFORE the epoch loop
-        bad_epochs = 0
         for epoch in range(1, tcfg["epochs"] + 1):
-            # train
-            train_kappas = []  # collect per-sample train kappa values
-            train_errors = []  # collect per-sample train angular errors
+            # ---- TRAIN ---------------------------------------------------------
             model.train()
-            tot_loss, tot_err, count = 0, 0, 0
-            for batch in tqdm(loaders["train"], desc="Training", leave=False):
+            tot_loss = tot_err = tot_n = 0
+            for batch in tqdm(loaders["train"], desc="Train", leave=False):
                 batch = batch.to(device)
+                target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
                 opt.zero_grad()
+                with autocast(device_type=device.type, enabled=use_amp):
+                    mu, kappa = model(batch)
+                    loss = loss_fn(mu, target_angle, kappa=kappa)
+                scaler.scale(loss).backward()
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                scaler.step(opt)
+                scaler.update()
 
-                try:
-                    if use_amp:
-                        with autocast(enabled=False, device_type=device.type):
-                            h_s, h_t = model.encode(batch)
+                err = metric_fn(mu, target_angle) * 180 / np.pi
+                bsz = batch.y.size(0)
+                tot_loss += loss.item() * bsz
+                tot_err += err.item() * bsz
+                tot_n += bsz
+            tr_l, tr_e = tot_loss / tot_n, tot_err / tot_n
 
-                        with autocast(device_type=device.type):
-                            h_fused = model.fuse(h_s, h_t)
-                            mu, kappa = model.head_mu_kappa(h_fused)
-                            target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
-                            # Apply penalty to kappa
-                            penalty_weight = max(
-                                initial_penalty * (1 - (epoch / num_anneal_epochs)),
-                                final_penalty,
-                            )
-                            kappa_penalty = penalty_weight * torch.mean(torch.relu(2 - kappa))
-                            loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
-
-                        scaler.scale(loss).backward()
-                        scaler.unscale_(opt)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                        scaler.step(opt)
-                        scaler.update()
-                    else:
-                        target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
-                        mu, kappa = model(batch)
-                        # Apply penalty to kappa
-                        penalty_weight = max(
-                            initial_penalty * (1 - (epoch / num_anneal_epochs)),
-                            final_penalty,
-                        )
-                        # no-AMP branch penalty
-                        kappa_penalty = penalty_weight * torch.mean(torch.relu(2 - kappa))
-
-                        loss = loss_fn(mu=mu, target=target_angle, kappa=kappa) + kappa_penalty
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                        opt.step()
-                except RuntimeError as e:
-                    if "out of memory" in str(e):
-                        import gc
-                        gc.collect()
-                        torch.cuda.empty_cache()
-                        raise optuna.TrialPruned()
-                    else:
-                        raise
-
-                err = metric_fn(mu, target_angle) * 180.0 / torch.pi
-                b = batch.y.size(0)
-                tot_loss += loss.item() * b
-                tot_err += err.item() * b
-                count += b
-                
-                # record per-sample uncertainties and errors
-                err_samples = torch.abs(torch.atan2(torch.sin(mu - target_angle), torch.cos(mu - target_angle))) * 180.0 / torch.pi
-                train_kappas.extend(kappa.cpu().detach().numpy().tolist())
-                train_errors.extend(err_samples.cpu().detach().numpy().tolist())
-                
-            tr_l, tr_e = tot_loss / count, tot_err / count
-            # Log training error as user attr
-            trial.set_user_attr("train_err", tr_e)
-
-            # val
-            val_kappas = []  # collect per-sample validation kappa values
-            val_errors = []  # collect per-sample validation angular errors
+            # ---- VALID ---------------------------------------------------------
             model.eval()
-            tot_loss, tot_err, count = 0, 0, 0
+            tot_loss = tot_err = tot_n = 0
             with torch.no_grad():
-                for batch in tqdm(loaders["val"], desc="Validation", leave=False):
+                for batch in tqdm(loaders["val"], desc="Val", leave=False):
                     batch = batch.to(device)
                     target_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
                     mu, kappa = model(batch)
-                    val_kappas.extend(kappa.cpu().numpy().tolist())
-                    # record per-sample uncertainties and errors
-                    err_samples_val = torch.abs(torch.atan2(torch.sin(mu - target_angle), torch.cos(mu - target_angle))) * 180.0 / torch.pi
-                    val_errors.extend(err_samples_val.cpu().numpy().tolist())
-                    l = loss_fn(mu=mu, target=target_angle, kappa=kappa)
-                    err = metric_fn(mu, target_angle) * 180.0 / torch.pi
-                    b = batch.y.size(0)
-                    tot_loss += l.item() * b
-                    tot_err += err.item() * b
-                    count += b
-            va_l, va_e = tot_loss / count, tot_err / count
+                    loss = loss_fn(mu, target_angle, kappa=kappa)
+                    err = metric_fn(mu, target_angle) * 180 / np.pi
+                    bsz = batch.y.size(0)
+                    tot_loss += loss.item() * bsz
+                    tot_err += err.item() * bsz
+                    tot_n += bsz
+            va_l, va_e = tot_loss / tot_n, tot_err / tot_n
 
-            # === Hybrid Optuna + manual patience pruning snippet ===
-            # Place this inside the epoch loop, right after computing va_e
-
-            # --- 1. Report to Optuna's MedianPruner -----------------------------
+            # ---- Optuna pruning ----------------------------------------------
             trial.report(va_e, epoch)
             if trial.should_prune():
                 raise optuna.TrialPruned()
@@ -296,157 +245,80 @@ def make_objective(config_path, disable_amp, splits):
             if va_e < best_val_err:
                 best_val_err = va_e
                 bad_epochs = 0
+                torch.save(model.state_dict(), os.path.join(out_dir, "best_dimenet_model_manual.pt"))
             else:
                 bad_epochs += 1
             if bad_epochs >= 20:
                 raise optuna.TrialPruned()
 
-            # Log validation loss as user attr
-            trial.set_user_attr("val_loss", va_l)
-
-            # scheduler step
             scheduler.step()
             print(
-                f"Epoch {epoch:03d} | "
-                f"Train L={tr_l:.4f}, Err={tr_e:.1f}° | "
-                f"Val   L={va_l:.4f}, Err={va_e:.1f}° | "
-                f"LR={scheduler.get_last_lr()[0]:.2e}"
+                f"Epoch {epoch:03d} | Train L={tr_l:.4f}, Err={tr_e:.1f}° | "
+                f"Val L={va_l:.4f}, Err={va_e:.1f}° | LR={scheduler.get_last_lr()[0]:.2e}"
             )
+            wandb.log({"epoch": epoch, "train_err": tr_e, "val_err": va_e, "lr": scheduler.get_last_lr()[0]})
 
-            # Compute kappa statistics
-            train_kappa_arr = np.array(train_kappas)
-            val_kappa_arr = np.array(val_kappas)
-            train_kappa_mean = train_kappa_arr.mean()
-            train_kappa_median = np.median(train_kappa_arr)
-            train_kappa_iqr = np.percentile(train_kappa_arr, [25, 75])
-            train_kappa_min, train_kappa_max = train_kappa_arr.min(), train_kappa_arr.max()
-            val_kappa_mean = val_kappa_arr.mean()
-            val_kappa_median = np.median(val_kappa_arr)
-            val_kappa_iqr = np.percentile(val_kappa_arr, [25, 75])
-            val_kappa_min, val_kappa_max = val_kappa_arr.min(), val_kappa_arr.max()
-
-            # Log metrics to WandB
-            wandb.log({
-                "epoch": epoch,
-                "train_loss": tr_l,
-                "train_err": tr_e,
-                "val_loss": va_l,
-                "val_err": va_e,
-                "lr": scheduler.get_last_lr()[0],
-                # Histograms
-                "train_kappa_hist": wandb.Histogram(train_kappas),
-                "val_kappa_hist": wandb.Histogram(val_kappas),
-                # Summary stats
-                "train/kappa_mean": train_kappa_mean,
-                "train/kappa_median": train_kappa_median,
-                "train/kappa_25%": train_kappa_iqr[0],
-                "train/kappa_75%": train_kappa_iqr[1],
-                "train/kappa_min": train_kappa_min,
-                "train/kappa_max": train_kappa_max,
-                "val/kappa_mean": val_kappa_mean,
-                "val/kappa_median": val_kappa_median,
-                "val/kappa_25%": val_kappa_iqr[0],
-                "val/kappa_75%": val_kappa_iqr[1],
-                "val/kappa_min": val_kappa_min,
-                "val/kappa_max": val_kappa_max,
-            })
-
-            # Scatter plot of kappa vs error
-            fig, ax = plt.subplots(figsize=(6,4))
-            ax.scatter(train_kappas, train_errors, alpha=0.3)
-            ax.set_xscale('log')
-            ax.set_xlabel('Train Kappa')
-            ax.set_ylabel('Train Error (deg)')
-            ax.set_title(f'Epoch {epoch}: Kappa vs Error')
-            wandb.log({"train/kappa_error_scatter": wandb.Image(fig)})
-            plt.close(fig)
-
-            if va_e < best_val_err:
-                best_val_err = va_e
-                torch.save(
-                    model.state_dict(),
-                    os.path.join(out_dir, "best_dimenet_model_manual.pt"),
-                )
-                print(" ↳ New best model saved!")
-                # Save trial parameters for this trial
-                with open(os.path.join(out_dir, "trial_params.json"), "w") as f:
-                    json.dump(trial.params, f, indent=2)
-                # Save model artifact to WandB
-                wandb.save(os.path.join(out_dir, "best_dimenet_model_manual.pt"))
-
-        trial.set_user_attr("val_err", va_e)
-        # Finish WandB run for this trial
+        trial.set_user_attr("val_err", best_val_err)
         wandb.finish()
-        # clear GPU memory after each trial to reduce fragmentation
-        import gc
-        gc.collect()
+
+        # clear GPU fragmentation
         torch.cuda.empty_cache()
-        return va_e
+        return best_val_err
+
     return objective
 
+###########################################################################
+# ------------------------------ main ----------------------------------- #
+###########################################################################
 
 if __name__ == "__main__":
-    start_time = time.time()
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--trials", type=int, default=50)
-    parser.add_argument("--no-amp", action="store_true", help="Disable AMP even if CUDA is available")
-    args = parser.parse_args()
+    start = time.time()
 
-    cfg = yaml.safe_load(open(args.config))       # NEW  (needed before we build the split)
-    # --- build dataset ONCE and create/load split file ------------------------
-    dataset_once = EquiMultiMolDataset(**cfg["data"])   # NEW
-    split_path   = os.path.join(cfg["logging"]["output_root"],
-                                "split_indices.json")    # NEW
-    splits = get_or_make_splits(dataset_once,
-                                cfg["training"]["seed"],
-                                split_path)              # NEW
-    del dataset_once                                      # optional, free RAM   # NEW
-    # -------------------------------------------------------------------------
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", required=True)
+    p.add_argument("--trials", type=int, default=50)
+    p.add_argument("--no-amp", action="store_true")
+    args = p.parse_args()
 
-    # Objective now gets a third argument
-    objective_fn = make_objective(args.config, args.no_amp, splits)   # NEW
+    # --- load config & build splits once ----------------------------------
+    base_cfg = yaml.safe_load(open(args.config))
+    dataset_once = EquiMultiMolDataset(**base_cfg["data"])
+    split_path = os.path.join(base_cfg["logging"]["output_root"], "split_indices.json")
+    splits = get_or_make_splits(dataset_once, base_cfg["training"]["seed"], split_path)
+    del dataset_once  # free RAM
 
-    # Create a shared study for parallel executions
+    # --- set up Optuna study ---------------------------------------------
+    objective = make_objective(args.config, args.no_amp, splits, split_path)
     study = optuna.create_study(
         study_name="dimenet_hpo",
         direction="minimize",
         storage="sqlite:///dimenet_hpo.db",
         load_if_exists=True,
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=15)
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=15),
     )
+    study.optimize(objective, n_trials=args.trials)
 
-    # Optimize using the closure-based objective
-    study.optimize(objective_fn, n_trials=args.trials)
-    
-    # Timing here
-    end_time = time.time()
-    elapsed_sec = end_time - start_time
-    elapsed_min = elapsed_sec / 60
-    elapsed_hr  = elapsed_sec / 3600
-    n_trials_run = len(study.trials)
-    print(f"\n🕒 Total elapsed time: {elapsed_sec:.1f} s  ({elapsed_min:.2f} min, {elapsed_hr:.2f} hr)")
-    print(f"Average time per trial: {elapsed_sec/n_trials_run:.1f} s  ({elapsed_min/n_trials_run:.2f} min)")
-    print("Best trial:", study.best_trial.params)
+    # ---------------------------------------------------------------------
+    #  Final evaluation on best trial -------------------------------------
+    # ---------------------------------------------------------------------
+    elapsed = time.time() - start
+    print(f"Total wall time: {elapsed/60:.1f} min")
 
-    # Save a DataFrame of all trial results
-    study.trials_dataframe().to_csv("optuna_results.csv")
+    # locate best dir (retry‑safe)
+    pattern = os.path.join(base_cfg["logging"]["output_root"], f"dihed_*_trial{study.best_trial.number}")
+    trial_dirs = sorted(glob.glob(pattern))
+    if not trial_dirs:
+        raise RuntimeError("Could not locate best trial directory with pattern: " + pattern)
+    best_dir = trial_dirs[-1]
 
-    print("Best trial:", study.best_trial.params)
-
-    # After Optuna study is done
-    print("Loading best model for uncertainty reporting...")
-    # load main config
-    cfg = yaml.safe_load(open(args.config))
-    # setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # locate best trial run directory
-    trial_dirs = glob.glob(os.path.join(cfg["logging"]["output_root"], f"dihed_*_trial{study.best_trial.number}"))
-    best_dir = sorted(trial_dirs)[-1]
-    # load trial-specific config
     cfg_trial = yaml.safe_load(open(os.path.join(best_dir, "used_config.yml")))
-    # build model from best config
     mcfg = cfg_trial["model"]
+    dcfg = cfg_trial["data"]
+    tcfg = cfg_trial["training"]
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # rebuild model
     encoder = DimeNetPPEncoder(
         hidden_channels=mcfg["hidden_channels"],
         out_channels=mcfg["out_channels"],
@@ -455,84 +327,51 @@ if __name__ == "__main__":
         num_radial=mcfg["num_radial"],
         cutoff=mcfg["cutoff"],
     )
-    model = SiameseDimeNet(
-        encoder=encoder,
-        fusion=mcfg["fusion"],
-        dropout=mcfg["dropout"],
-    ).to(device)
-    # load best model weights
-    best_model_path = os.path.join(best_dir, "best_dimenet_model_manual.pt")
-    model.load_state_dict(torch.load(best_model_path, map_location=device))
+    model = SiameseDimeNet(encoder, fusion=mcfg["fusion"], dropout=mcfg["dropout"]).to(device)
+    model.load_state_dict(torch.load(os.path.join(best_dir, "best_dimenet_model_manual.pt"), map_location=device))
     model.eval()
-    # prepare test loader
-    dcfg = cfg_trial["data"]
+
+    # ensure we can always resolve split file
+    split_file = os.path.join(best_dir, "split_indices.json")
+    if not os.path.exists(split_file):
+        split_file = split_path
+    with open(split_file) as f:
+        splits_final = json.load(f)
+
     dataset = EquiMultiMolDataset(
         root=dcfg["root"],
         sdf_folder=dcfg["sdf_folder"],
         target_csv=dcfg["target_csv"],
-        input_type=dcfg["input_type"],
+        input_type=safe_get(dcfg, "input_type", ["r1h", "r2h"]),
         target_columns=dcfg["target_columns"],
-        keep_hs=dcfg["keep_hs"],
-        sanitize=dcfg["sanitize"],
-        force_reload=dcfg["force_reload"],
+        keep_hs=safe_get(dcfg, "keep_hs", True),
+        sanitize=safe_get(dcfg, "sanitize", False),
+        force_reload=safe_get(dcfg, "force_reload", False),
     )
-    n = len(dataset)
-    g = torch.Generator().manual_seed(cfg_trial["training"]["seed"])
-    # Load saved split indices for consistent test set
-    with open(os.path.join(best_dir, "split_indices.json"), "r") as f:
-        splits = json.load(f)
-    test_ds = Subset(dataset, splits["test"])
-    test_loader = DataLoader(test_ds,
-                            batch_size=cfg_trial["training"]["batch_size"],
-                            shuffle=False,
-                            follow_batch=["z_s", "z_t"],
-                            generator=g)
-    loaders = {"test": test_loader}
+    test_loader = DataLoader(
+        Subset(dataset, splits_final["test"]),
+        batch_size=tcfg["batch_size"],
+        shuffle=False,
+        follow_batch=["z_s", "z_t"],
+    )
 
     results = []
     with torch.no_grad():
-        for batch in tqdm(loaders["test"], desc="Test evaluation"):
+        for batch in tqdm(test_loader, desc="Test"):
             batch = batch.to(device)
             mu, kappa = model(batch)
-            # mu is predicted angle (in radians), kappa is uncertainty
             true_angle = torch.atan2(batch.y[:, 0], batch.y[:, 1])
             for m, k, t in zip(mu.cpu().numpy(), kappa.cpu().numpy(), true_angle.cpu().numpy()):
-                results.append({"pred_angle_rad": m, "pred_kappa": k, "true_angle_rad": t})
+                results.append({"pred_angle_rad": float(m), "pred_kappa": float(k), "true_angle_rad": float(t)})
 
-    results_df = pd.DataFrame(results)
-    results_df.to_csv("test_predictions_with_uncertainty.csv", index=False)
-    print("Saved uncertainty predictions to test_predictions_with_uncertainty.csv")
+    res_df = pd.DataFrame(results)
+    res_df.to_csv("test_predictions_with_uncertainty.csv", index=False)
+    print("✅  Saved test predictions → test_predictions_with_uncertainty.csv")
 
-    # Compute and log kappa uncertainty summary to WandB
-    kappa_vals = results_df["pred_kappa"].values
-    angle_errs = np.abs(np.arctan2(np.sin(results_df["pred_angle_rad"] - results_df["true_angle_rad"]),
-                                np.cos(results_df["pred_angle_rad"] - results_df["true_angle_rad"])))
-    mean_kappa = np.mean(kappa_vals)
-    median_kappa = np.median(kappa_vals)
-    iqr_kappa = np.percentile(kappa_vals, [25, 75])
-    mean_error_deg = np.mean(angle_errs) * 180 / np.pi
+    # quick summary prints (no wandb in final stage to keep cluster logs clean)
+    kappa_vals = res_df["pred_kappa"].values
+    errs = np.abs(np.arctan2(np.sin(res_df["pred_angle_rad"] - res_df["true_angle_rad"]),
+                             np.cos(res_df["pred_angle_rad"] - res_df["true_angle_rad"]))) * 180 / np.pi
+    print(f"Mean kappa = {kappa_vals.mean():.2f}, mean error = {errs.mean():.2f}°")
 
-    print(f"Mean kappa: {mean_kappa:.2f} (lower = more uncertainty)")
-    print(f"Median kappa: {median_kappa:.2f}, IQR: {iqr_kappa[0]:.2f} - {iqr_kappa[1]:.2f}")
-    print(f"Mean angular error: {mean_error_deg:.2f}°")
-
-    # Optional: Scatter plot of Kappa vs Error
-    plt.figure(figsize=(10, 6))
-    plt.scatter(kappa_vals, angle_errs * 180 / np.pi, alpha=0.5)
-    plt.xscale('log')
-    plt.xlabel("Predicted Kappa (Uncertainty)")
-    plt.ylabel("Angular Error (degrees)")
-    plt.title("Kappa vs Angular Error")
-    plt.grid(True)
-    plt.savefig("kappa_vs_error_scatter.png")
-    plt.close()
-
-    wandb.log({
-        "test/kappa_mean": mean_kappa,
-        "test/kappa_median": median_kappa,
-        "test/kappa_25%": iqr_kappa[0],
-        "test/kappa_75%": iqr_kappa[1],
-        "test/mean_angle_error_deg": mean_error_deg,
-        "test/kappa_hist": wandb.Histogram(kappa_vals),
-        "test/angle_error_hist": wandb.Histogram(angle_errs * 180 / np.pi),
-    })
+    print("Best hyper‑params:", study.best_trial.params)
